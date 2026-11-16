@@ -2,7 +2,7 @@
 // network guard, domain age (RDAP), optional Google Safe Browsing.
 import dns from 'node:dns/promises';
 import net from 'node:net';
-import { isAdultHost } from './rules.mjs';
+import { isAdultHost, maskHost } from './rules.mjs';
 
 const SHORTENERS = /^(?:bit\.ly|tinyurl\.com|t\.co|goo\.gl|is\.gd|cutt\.ly|rb\.gy|shorturl\.at|tiny\.cc|ow\.ly|buff\.ly|rebrand\.ly|s\.id|t\.ly|v\.gd|qrco\.de|linktr\.ee)$/i;
 const RISKY_TLD = /\.(?:zip|mov|xyz|top|click|country|gq|tk|ml|cf|ga|work|rest|cam|lol|quest|cfd|sbs)$/i;
@@ -45,7 +45,7 @@ export function urlShape(u) {
   if (RISKY_TLD.test(host)) f.push({ rule: 'risky-tld', severity: 'info', category: 'context', title: 'Low-cost domain ending', detail: `.${host.split('.').pop()} domains are cheap and often used for throwaway sites.`, source: 'observed' });
   if (u.protocol === 'http:') f.push({ rule: 'no-tls', severity: 'info', category: 'context', title: 'Not encrypted (http)', detail: 'The page loads without HTTPS.', source: 'observed' });
   if (u.username || /@/.test(u.href.split('?')[0].replace(/^https?:\/\//, '').split('/')[0])) f.push({ rule: 'userinfo', severity: 'warn', category: 'phishing', title: 'Hidden real address', detail: 'The link uses an "@" trick so the part you read is not where it goes.', source: 'observed' });
-  if (isAdultHost(host)) f.push({ rule: 'adult-host', severity: 'block', category: 'nsfw', title: 'Adult website', detail: `${host} is a known adult site.`, source: 'observed' });
+  if (isAdultHost(host)) f.push({ rule: 'adult-host', severity: 'block', category: 'nsfw', title: 'Adult website', detail: `${maskHost(host)} is a known adult site.`, source: 'observed' });
   return f;
 }
 

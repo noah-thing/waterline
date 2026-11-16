@@ -12,7 +12,14 @@ export const ADULT_DOMAINS = [
 const adultHost = new RegExp(`(?:^|\\.)(?:${ADULT_DOMAINS.map(d => d.replace(/[-.]/g, '\\$&')).join('|')})\\.[a-z.]{2,8}$`, 'i');
 export const isAdultHost = host => adultHost.test(host || '');
 // Adult names are never printed in full, so the report itself is safe to show on stream.
-export const maskHost = host => String(host || '').replace(/^www\./, '').replace(/^([a-z0-9])([a-z0-9-]+)([a-z0-9])(?=\.)/i, (m, a, mid, z) => a + '•'.repeat(Math.min(mid.length, 6)) + z);
+export const maskHost = host => {
+  const parts = String(host || '').toLowerCase().replace(/^www\./, '').split('.');
+  if (parts.length < 2) return parts.join('.');
+  const i = parts.length - (/^(?:co|com|net|org)$/.test(parts.at(-2)) && parts.length > 2 ? 3 : 2);
+  const l = parts[i];
+  parts[i] = l.length <= 2 ? '••' : l[0] + '•'.repeat(Math.min(l.length - 2, 6)) + l.at(-1);
+  return parts.join('.');
+};
 const adultUrlInCode = new RegExp(`https?://(?:[a-z0-9-]+\\.)*(?:${ADULT_DOMAINS.join('|')})\\.[a-z.]{2,8}`, 'i');
 
 export const IP_LOGGERS = /(?:grabify\.link|iplogger\.(?:org|com|ru|co|info)|2no\.co|yip\.su|iplis\.ru|ps3cfw\.com|blasze\.(?:com|tk)|ipgrabber\.ru|bmwforum\.co|leancoding\.co|spottyfly\.com|stopify\.co|minecraftcapes\.co|headshot\.monster|gamingfun\.me|crabrave\.pw|lovebird\.guru|trulove\.guru|dateing\.club|shrekis\.life|otherhalf\.life|joinmy\.site|fortnitechat\.site|fortnight\.space|freegiftcards\.co|stopify\.co|catsnthing\.com|curiouscat\.club|canadianlumberjacks\.online)/i;

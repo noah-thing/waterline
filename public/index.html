@@ -66,23 +66,14 @@
         <button id="go" type="submit"><span id="goLabel">Check</span></button>
       </form>
       <div class="log" id="log" role="status" aria-live="polite"><div class="hint">Opens it sealed. Plays it. Reads what is under the surface.</div></div>
-      <div class="film" id="film" aria-hidden="true"></div>
     </div>
 
     <div class="report" id="report" hidden>
-      <div class="rp-a">
-        <p class="tag"><span>[ Verdict ]</span><b id="rpWord"></b></p>
-        <p class="r-head" id="rHead"></p>
-        <p class="r-line" id="rLine"></p>
-        <p class="r-url" id="rUrl"></p>
-        <dl class="nums" id="nums"></dl>
-        <button id="again" type="button">Check another link</button>
-      </div>
-      <div class="rp-b">
-        <p class="tag"><span>[ Sounding report ]</span><b id="rpTime"></b></p>
-        <ol class="rows" id="rows"></ol>
-        <div class="strip-wrap" id="stripWrap"><p class="tag"><span>[ Frames, pixelated ]</span></p><div class="strip" id="strip"></div></div>
-      </div>
+      <div class="r-top"><p class="r-kicker"><b id="rpWord"></b><span id="rpTime"></span></p><button id="again" type="button">Check another link</button></div>
+      <p class="r-head" id="rHead"></p>
+      <p class="r-line" id="rLine"></p>
+      <ol class="r-list" id="rList"></ol>
+      <p class="r-meta" id="rMeta"></p>
     </div>
 
     <p class="foot fl" aria-hidden="true">Chromium · NSFWJS · Jev · DeepSeek</p>

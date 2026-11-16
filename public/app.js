@@ -119,10 +119,11 @@ function buildGrid() {
 
 function measureDock() {
   const h = hero.getBoundingClientRect();
-  const els = S.state === 'done' ? [$('#report')] : [...document.querySelectorAll('.lede, #form, #log, #film')];
+  const els = S.state === 'done' ? [$('#report')] : [...document.querySelectorAll('.lede, #form, #log')];
   let l = 1e9, t = 1e9, r = -1e9, b = -1e9;
   for (const k of els) { const q = k.getBoundingClientRect(); if (!q.width) continue; l = Math.min(l, q.left); t = Math.min(t, q.top); r = Math.max(r, q.right); b = Math.max(b, q.bottom); }
-  dockRect = r > l ? { l: l - h.left - 36, t: t - h.top - 16, r: r - h.left + 36, b: b - h.top + 16 } : null;
+  const pad = S.state === 'done' ? 40 : 16;
+  dockRect = r > l ? { l: l - h.left - 48, t: t - h.top - pad, r: r - h.left + 48, b: b - h.top + 16 } : null;
 }
 
 const lineY = p => geo.wlY + 18 + p * (H - geo.wlY - 60);
@@ -339,17 +340,6 @@ function logLine(text, stamp, cls = '') {
 }
 function logReset(text, cls = 'hint') { log.textContent = ''; const li = document.createElement('div'); li.className = cls; li.textContent = text; log.appendChild(li); }
 
-// ── Filmstrip ──────────────────────────────────────────────
-const film = $('#film');
-function filmReset() { film.textContent = ''; for (let i = 0; i < 6; i++) { const d = document.createElement('div'); d.className = 'slot'; film.appendChild(d); } }
-const okThumb = s => typeof s === 'string' && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(s);
-function addFrame(f) {
-  if (!okThumb(f.thumb)) return;
-  const slot = [...film.children].find(s => !s.classList.contains('in')); if (!slot) return;
-  const im = document.createElement('img'); im.src = f.thumb; im.alt = ''; slot.appendChild(im);
-  requestAnimationFrame(() => requestAnimationFrame(() => slot.classList.add('in')));
-}
-
 // ── Flow ───────────────────────────────────────────────────
 const form = $('#form'), go = $('#go'), report = $('#report');
 function setState(st) { S.state = st; hero.dataset.state = st; }
@@ -370,7 +360,7 @@ function fail(msg) { toIdle(); logReset(msg, 'err'); input.focus(); }
 async function run(url) {
   setState('scanning'); S.progress = 0.01; S.shown = 0;
   input.readOnly = true; go.disabled = true;
-  filmReset(); wire.textContent = ''; log.textContent = ''; logLine('Sending to the scanner', '+0.0s');
+  wire.textContent = ''; log.textContent = ''; logLine('Sending to the scanner', '+0.0s');
   startStream();
   setTimeout(measureDock, 450);
   const t0 = performance.now();
@@ -394,7 +384,7 @@ async function run(url) {
       let ev; try { ev = JSON.parse(line); } catch { continue; }
       if (ev.type === 'stage' && STAGES.includes(ev.id)) { setStage(ev.id); pushStream(`── ${STAGE_NAME[ev.id].toUpperCase()} ──`, true, stamp()); }
       else if (ev.type === 'log' && typeof ev.text === 'string') { const t = ev.text.slice(0, 90); logLine(t, stamp()); pushStream(t.slice(0, 60), true, stamp()); }
-      else if (ev.type === 'frame') addFrame(ev);
+      else if (ev.type === 'frame' && ev.label) pushStream(`── frame · ${String(ev.label).slice(0, 40)}`, true, stamp());
       else if (ev.type === 'req') pushWire(ev);
       else if (ev.type === 'result') result = ev;
       else if (ev.type === 'error') return fail(ev.error || 'Something went wrong.');
@@ -407,23 +397,17 @@ async function run(url) {
   showReport(result);
 }
 
-// Which depth a finding belongs to.
-const ADDRESS = new Set(['raw-ip', 'punycode', 'shortener', 'risky-tld', 'no-tls', 'userinfo', 'adult-host', 'new-domain', 'safebrowsing']);
-const RENDER = new Set(['adult-request', 'iplogger-request', 'dialog', 'download']);
-function depthOf(f) {
-  if (ADDRESS.has(f.rule)) return 'address';
-  if (RENDER.has(f.rule)) return 'render';
-  if (/^(frame|image)-/.test(f.rule)) return 'images';
-  if (f.source === 'code') return 'code';
-  return 'play';
-}
 const SEV_COLOR = { block: 'var(--unsafe)', warn: 'var(--caution)', info: 'var(--frost)' };
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
-function countUp(el, to, ms = 900) {
-  if (reduce || !to) { el.textContent = String(to); return; }
-  const t0 = performance.now();
-  const step = now => { const k = Math.min(1, (now - t0) / ms); el.textContent = String(Math.round(to * ease(k))); if (k < 1) requestAnimationFrame(step); };
-  requestAnimationFrame(step);
+// One plain sentence under the headline, written from what was actually found.
+function summary(v, fs, s) {
+  const blocks = fs.filter(f => f.severity === 'block').length, warns = fs.filter(f => f.severity === 'warn').length;
+  const read = `read ${plural(s.scripts || 0, 'file', 'files')} and ${plural(s.images || 0, 'image', 'images')}`;
+  if (v === 'safe') return `Waterline played it, ${read}, and ran its timers seven minutes ahead. Nothing explicit, hostile or sneaky turned up.`;
+  if (v === 'unsafe') return `${plural(blocks, 'serious problem', 'serious problems')}${warns ? ` and ${plural(warns, 'thing', 'things')} worth a look` : ''}, found after playing it and reading what it loads.`;
+  if (v === 'caution') return `Nothing clearly dangerous, but ${plural(warns, 'thing is', 'things are')} worth a look before you open it live.`;
+  return null;
 }
 
 function showReport(r) {
@@ -437,68 +421,63 @@ function showReport(r) {
   const fs = Array.isArray(r.findings) ? r.findings : [];
   const s = r.stats || {};
   $('#rpWord').textContent = VERDICT_TAG[v];
+  $('#rpTime').textContent = r.cached ? 'checked in the last 10 min' : (s.seconds != null ? `in ${Math.round(s.seconds)} seconds` : '');
   $('#rHead').textContent = r.headline || '';
-  $('#rLine').textContent = r.line || '';
-  $('#rUrl').textContent = r.finalUrl || r.url || '';
-  $('#rpTime').textContent = r.cached ? 'From the last 10 min' : (s.seconds != null ? `${s.seconds} s` : '');
 
-  const nums = $('#nums'); nums.textContent = '';
-  const cells = [['Requests', s.requests || 0], ['Files read', s.scripts || 0], ['Images', s.images || 0], ['Frames', s.frames || 0]];
-  const ddEls = cells.map(([label]) => {
-    const d = document.createElement('div'), dt = document.createElement('dt'), dd = document.createElement('dd');
-    dt.textContent = label; dd.textContent = '0'; d.append(dt, dd); nums.appendChild(d); return dd;
-  });
 
-  const rows = $('#rows'); rows.textContent = '';
-  for (const st of STAGES) {
-    const li = document.createElement('li');
-    const mine = st === 'judge' ? fs.filter(f => f.rule === 'deepseek') : fs.filter(f => f.rule !== 'deepseek' && depthOf(f) === st);
-    const shown = mine.filter(f => f.rule !== 'no-tls' && (f.severity !== 'info' || v === 'safe'));
-    const worst = mine.find(f => f.severity === 'block') ? 'block' : mine.find(f => f.severity === 'warn') ? 'warn' : null;
-    const row = document.createElement('div'); row.className = 'row';
-    const d = document.createElement('span'); d.className = 'd'; d.textContent = String(STAGES.indexOf(st) * 100).padStart(3, '0');
-    const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = STAGE_NAME[st];
-    const lead = document.createElement('span'); lead.className = 'lead';
-    const status = document.createElement('span'); status.className = 'st';
-    if (st === 'judge') {
-      const confirmed = fs.filter(f => f.ai != null).length;
-      status.textContent = [confirmed && `${confirmed} confirmed`, s.cleared && `${s.cleared} cleared`].filter(Boolean).join(' · ') || 'Nothing to judge';
-      if (worst) status.classList.add(worst);
-    } else if (worst === 'block') { status.textContent = `${mine.filter(f => f.severity === 'block').length} danger`; status.classList.add('block'); }
-    else if (worst === 'warn') { status.textContent = `${mine.filter(f => f.severity === 'warn').length} to check`; status.classList.add('warn'); }
-    else if (v === 'unknown' && st !== 'address') status.textContent = 'Not reached';
-    else { status.textContent = 'Clear'; status.classList.add('clear'); }
-    row.append(d, nm, lead, status); li.appendChild(row);
-    if (shown.length) {
-      const ul = document.createElement('ul'); ul.className = 'finds';
-      for (const f of shown.slice(0, 3)) {
-        const fi = document.createElement('li'); fi.style.setProperty('--sev', SEV_COLOR[f.severity] || 'var(--frost)');
-        const t = document.createElement('span'); t.className = 't'; t.textContent = f.title || '';
-        const dd = document.createElement('span'); dd.className = 'd2'; dd.textContent = f.detail || '';
-        fi.append(t, dd);
-        if (f.excerpt && f.excerpt !== '[hidden]' && !['stream', 'nsfw'].includes(f.category)) { const x = document.createElement('span'); x.className = 'x'; x.textContent = f.excerpt.slice(0, 140); fi.append(x); }
-        if (okThumb(f.thumb)) { const im = document.createElement('img'); im.src = f.thumb; im.alt = 'Pixelated capture'; fi.append(im); }
-        ul.appendChild(fi);
-      }
-      li.appendChild(ul);
-    }
-    rows.appendChild(li);
+  // Findings, grouped by kind, worst first; notes only when nothing serious was found.
+  const list = $('#rList'); list.textContent = '';
+  const serious = fs.filter(f => f.severity !== 'info');
+  const groups = [];
+  // Findings that describe the same threat (seen in the code and seen happening) are one item.
+  const kind = f => /iplogger/.test(f.rule) ? 'iplogger' : /^adult|nsfw$/.test(f.rule) || f.rule === 'adult-url' ? 'adult' : /clickfix/.test(f.rule) ? 'clickfix' : /^(frame|image)-nsfw/.test(f.rule) ? 'explicit-image' : f.rule;
+  for (const f of (v === 'safe' ? [] : serious)) {
+    const g = groups.find(x => x.kind === kind(f));
+    if (!g) groups.push({ ...f, kind: kind(f) });
   }
-  const strip = $('#strip'); strip.textContent = '';
-  (r.frames || []).slice(0, 9).forEach(f => { if (okThumb(f.thumb)) { const im = document.createElement('img'); im.src = f.thumb; im.alt = f.label || ''; im.title = f.label || ''; strip.appendChild(im); } });
-  $('#stripWrap').hidden = !strip.children.length;
+  groups.slice(0, 4).forEach((f, i) => {
+    const li = document.createElement('li'); li.style.setProperty('--sev', SEV_COLOR[f.severity] || 'var(--frost)');
+    const n = document.createElement('span'); n.className = 'n'; n.textContent = String(i + 1).padStart(2, '0');
+    const t = document.createElement('span'); t.className = 't'; t.textContent = f.title;
+    const d = document.createElement('span'); d.className = 'd'; d.textContent = f.detail || '';
+    li.append(n, t, d); list.appendChild(li);
+  });
+  if (groups.length > 4) {
+    const li = document.createElement('li'); const sp = document.createElement('span'); sp.className = 'n';
+    const m = document.createElement('span'); m.className = 'more'; m.textContent = `+ ${plural(groups.length - 4, 'more finding', 'more findings')}`;
+    li.append(sp, m); list.appendChild(li);
+  }
+  list.hidden = !list.children.length;
+  $('#rLine').textContent = summary(v, groups.filter(g => g.severity === 'block').concat(groups.filter(g => g.severity === 'warn')), s) || r.line || '';
 
-  // Form leaves, the panel opens downward, its contents follow in order.
-  const order = [...report.querySelectorAll('.rp-a > *, .rp-b > .tag, #rows > li, .strip-wrap')];
-  order.forEach((el, i) => { el.classList.add('rv'); el.style.transitionDelay = reduce ? '0s' : (0.3 + i * 0.045).toFixed(3) + 's'; });
+  const bits = [];
+  if (s.requests != null) bits.push(plural(s.requests, 'request', 'requests'));
+  if (s.hosts) bits.push(plural(s.hosts, 'host', 'hosts'));
+  if (s.cleared) bits.push(`${s.cleared} cleared by AI`);
+  if (r.finalUrl || r.url) bits.push(String(r.finalUrl || r.url).replace(/^https?:\/\//, '').replace(/\/$/, '').slice(0, 48));
+  $('#rMeta').textContent = bits.join('  ·  ');
+
+  // Keep the whole report on screen: drop list items until it fits, and say how many are left.
+  report.hidden = false; report.style.visibility = 'hidden';
+  const items = () => [...list.querySelectorAll('li:not(.more-li)')];
+  let hiddenCount = Math.max(0, groups.length - 4);
+  while (report.scrollHeight > report.clientHeight + 2 && items().length > 1) { items().at(-1).remove(); hiddenCount++; }
+  list.querySelector('.more')?.closest('li')?.remove();
+  if (hiddenCount) {
+    const li = document.createElement('li'); li.className = 'more-li'; const sp = document.createElement('span'); sp.className = 'n';
+    const m = document.createElement('span'); m.className = 'more'; m.textContent = `+ ${plural(hiddenCount, 'more finding', 'more findings')}`;
+    li.append(sp, m); list.appendChild(li);
+    if (report.scrollHeight > report.clientHeight + 2 && items().length > 1) { items().at(-1).remove(); m.textContent = `+ ${plural(hiddenCount + 1, 'more finding', 'more findings')}`; }
+  }
+  report.style.visibility = ''; report.hidden = true;
+
+  const order = [...report.querySelectorAll('.r-top, .r-head, .r-line, #rList > li, .r-meta')];
+  order.forEach((el, i) => { el.classList.add('rv'); el.style.transitionDelay = reduce ? '0s' : (0.35 + i * 0.07).toFixed(2) + 's'; });
   setTimeout(() => {
-    report.hidden = false; report.scrollTop = 0; report.querySelector('.rp-b').scrollTop = 0;
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      report.classList.add('show'); measureDock();
-      setTimeout(() => cells.forEach(([, n], i) => countUp(ddEls[i], n)), reduce ? 0 : 450);
-    }));
-  }, reduce ? 0 : 320);
-  setTimeout(() => $('#again').focus({ preventScroll: true }), 1200);
+    report.hidden = false; report.scrollTop = 0;
+    requestAnimationFrame(() => requestAnimationFrame(() => { report.classList.add('show'); measureDock(); setTimeout(measureDock, 900); }));
+  }, reduce ? 0 : 300);
+  setTimeout(() => $('#again').focus({ preventScroll: true }), 1300);
 }
 
 function closeReport() {
@@ -581,7 +560,7 @@ document.querySelectorAll('.u-head, .section-art, .limits, .foot2').forEach(el =
 document.querySelectorAll('.u-list li').forEach((el, i) => { el.classList.add('reveal'); el.style.transitionDelay = (i * 0.06) + 's'; io.observe(el); });
 
 let rz; addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => { layout(); buildCrossSection(); }, 120); });
-introMark(); filmReset();
+introMark();
 img.decode().catch(() => {}).then(() => { layout(); buildCrossSection(); S.t0 = performance.now(); });
 document.fonts?.ready.then(() => layout());
 layout();

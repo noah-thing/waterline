@@ -8,7 +8,7 @@ import net from 'node:net';
 import sharp from 'sharp';
 import { normalizeUrl, guardHost, urlShape, domainAge, safeBrowsing, isPrivateIp } from './intel.mjs';
 import { scanCode, scanText, extractDataImages, extractImageUrls, isAdultHost, maskHost, isExecutable, IP_LOGGERS } from './rules.mjs';
-import { classify, pixelThumb } from './nsfw.mjs';
+import { classify } from './nsfw.mjs';
 import { startProxy, safeGet } from './egress.mjs';
 import { reviewImages, reviewFindings, reviewText, deepRead, hasJev, hasDeepSeek } from './judge.mjs';
 
@@ -167,7 +167,7 @@ export async function scan(input, { emit = () => {}, allowLocal = false, signal 
       const small = await sharp(buf, { animated: false, limitInputPixels: 25e6 }).resize(16, 10, { fit: 'fill' }).greyscale().raw().toBuffer();
       if (frames.some(f => f.small.reduce((s, v, i) => s + Math.abs(v - small[i]), 0) / small.length < 3)) return;
       frames.push({ buf, small, label }); stats.frames = frames.length;
-      emit({ type: 'frame', label, thumb: await pixelThumb(buf, 32) });
+      emit({ type: 'frame', label });
     };
 
     // 03 — play it like a person
@@ -319,7 +319,7 @@ export async function scan(input, { emit = () => {}, allowLocal = false, signal 
       reviewText(textWindow(text), finalUrl),
     ]);
     // Frames: what was actually on screen.
-    const thumbs = await Promise.all(frames.map(f => pixelThumb(f.buf, 40)));
+    const thumbs = []; // captures never leave the server
     frames.forEach((f, i) => {
       const j = frameJ[i], s = frameScores[i];
       const nude = j?.nudity ?? null, loc = s?.explicit ?? 0;
@@ -335,10 +335,10 @@ export async function scan(input, { emit = () => {}, allowLocal = false, signal 
       const c = imageCands[i], j = imgJ[i], loc = c.score.explicit, nude = j?.nudity ?? null;
       const explicit = nude != null ? (nude >= 0.7 || (nude >= 0.4 && loc >= 0.85)) : loc >= 0.9;
       const maybe = !explicit && (nude != null ? nude >= 0.45 : loc >= 0.6);
-      const where = c.hidden ? `Hidden inside ${c.url}` : (c.later ? 'Referenced in code, not shown yet' : 'Loaded by the page');
+      const where = c.hidden ? 'Hidden inside one of its scripts' : (c.later ? 'Referenced in code, not shown yet' : 'Loaded by the page');
       if (explicit || maybe) add({ rule: 'image-nsfw', severity: explicit ? 'block' : 'warn', category: 'nsfw',
         title: c.hidden ? 'Explicit image hidden in the code' : (explicit ? 'Explicit image in the game files' : 'Possibly explicit image in the files'),
-        detail: where + '.', where: c.url.slice(0, 120), thumb: await pixelThumb(c.buf, 32), score: Math.max(nude ?? 0, loc), source: 'images' });
+        detail: where + '.', where: c.url.slice(0, 120), score: Math.max(nude ?? 0, loc), source: 'images' });
       else judged.push({ kind: 'image', cleared: true });
     }
     // Code matches: Jev decides whether the match is hostile.
@@ -397,6 +397,10 @@ export async function scan(input, { emit = () => {}, allowLocal = false, signal 
 }
 
 const ORDER = { block: 0, warn: 1, info: 2 };
+// Adult addresses are never returned in full, so the report is safe to show on stream.
+function safeUrl(href) {
+  try { const u = new URL(href); return isAdultHost(u.hostname) ? `${u.protocol}//${maskHost(u.hostname)}/` : href; } catch { return ''; }
+}
 function verdict({ findings, loadError, url, finalUrl, title, stats, age, judged, thumbs, frames, t0 }) {
   findings.sort((a, b) => ORDER[a.severity] - ORDER[b.severity]);
   const blocks = findings.filter(f => f.severity === 'block'), warns = findings.filter(f => f.severity === 'warn');
@@ -406,9 +410,8 @@ function verdict({ findings, loadError, url, finalUrl, title, stats, age, judged
   else if (warns.length) { v = 'caution'; headline = 'Look before you open it live.'; line = warns[0].title + (warns.length > 1 ? `, and ${warns.length - 1} more.` : '.'); }
   else { v = 'safe'; headline = 'Safe to open on stream.'; line = 'Nothing explicit, hostile or sneaky turned up after playing it.'; }
   return {
-    verdict: v, headline, line, url: url.href, finalUrl, title: (title || '').slice(0, 120),
-    findings: findings.map(({ rule, severity, category, title, detail, where, excerpt, thumb, ai, source }) => ({ rule, severity, category, title, detail, where, excerpt, thumb, ai, source })),
-    frames: frames.map((f, i) => ({ label: f.label, thumb: thumbs[i] })),
+    verdict: v, headline, line, url: safeUrl(url.href), finalUrl: safeUrl(finalUrl),
+    findings: findings.map(({ rule, severity, category, title, detail, excerpt, ai, source }) => ({ rule, severity, category, title, detail, excerpt: category === 'nsfw' ? undefined : excerpt, ai, source })),
     stats: { requests: stats.requests, blocked: stats.blocked, hosts: stats.hosts.size, scripts: stats.scripts, mb: +(stats.scriptBytes / 1e6).toFixed(2),
       images: stats.images, frames: stats.frames, cleared: judged.filter(j => j.cleared).length, domainDays: age?.days ?? null, seconds: +((Date.now() - t0) / 1000).toFixed(1),
       engines: ['chromium', 'nsfwjs', hasJev() && 'jev', hasDeepSeek() && 'deepseek'].filter(Boolean) },

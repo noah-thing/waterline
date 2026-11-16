@@ -63,7 +63,9 @@ export default async function handler(req, res) {
 
   if (cached) { startStream(); send({ type: 'result', cached: true, ...cached }); return res.end(); }
 
-  if (!(await lock(id).catch(() => false))) return fail(res, 429, 'You already have a scan running. Wait for it to finish.');
+  let locked;
+  try { locked = await lock(id); } catch { return fail(res, 503, 'Busy right now. Try again in a minute.', { retry: 30 }); }
+  if (!locked) return fail(res, 429, 'You already have a scan running. Wait for it to finish.', { retry: 15 });
   try {
     let limited; try { limited = await reserveScan(id); } catch { limited = { reason: 'Busy right now. Try again in a minute.', retry: 60 }; }
     if (limited) return fail(res, 429, limited.reason, { retry: limited.retry });
