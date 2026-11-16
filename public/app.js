@@ -114,7 +114,10 @@ function buildGrid() {
       up.chars[i] = RAMP[Math.round(up.v[i] * (RAMP.length - 1))];
     }
   }
-  grid = { cw, ch, cols, rows, v, chars, flick, up, font: `${phone ? 10 : 11}px "Plex Mono", ui-monospace, monospace` };
+  // A fixed, uneven edge for the reading front (smooth, never a straight rule).
+  const jit = new Float32Array(cols);
+  for (let c = 0; c < cols; c++) jit[c] = 22 * Math.sin(c * 0.11) + 14 * Math.sin(c * 0.037 + 1.3) + 8 * Math.sin(c * 0.31 + 0.7);
+  grid = { cw, ch, cols, rows, v, chars, flick, up, jit, font: `${phone ? 10 : 11}px "Plex Mono", ui-monospace, monospace` };
 }
 
 function measureDock() {
@@ -208,13 +211,14 @@ function drawAscii(now, t) {
       let rC = 93, gC = 115, bC = 138;
       let a = 0.22 + 0.78 * b;
       if (scanning) {
-        if (dy > 0) a *= 0.5; else a = Math.min(1, a * 1.15);
-        const near = Math.abs(dy);
-        if (near < 70) {
-          const k = 1 - near / 70;
-          a = Math.min(1, a + 0.5 * k * (0.3 + b));
-          if (!reduce && Math.random() < 0.25 * k) chr = CODE[(Math.random() * CODE.length) | 0];
-          rC += (191 - rC) * k; gC += (227 - gC) * k; bC += (255 - bC) * k;
+        // No line: the berg is read from the top down along an uneven edge. Unread
+        // characters wait dim; at the edge they churn through code glyphs; read ones settle bright.
+        const e = dy - grid.jit[c];
+        if (e > 0) a *= 0.45; else a = Math.min(1, a * 1.12);
+        if (e > -28 && e < 20) {
+          const k = 1 - Math.abs(e + 4) / 24;
+          if (!reduce && Math.random() < 0.45 * Math.max(0, k)) chr = CODE[(Math.random() * CODE.length) | 0];
+          a = Math.min(1, a + 0.18 * Math.max(0, k));
         }
       }
       const m = Math.min(1, b * 1.1);
@@ -241,13 +245,6 @@ function drawAscii(now, t) {
     const [r, g, b, a] = key.split(',').map(Number);
     actx.fillStyle = `rgba(${r << 3},${g << 3},${b << 3},${a / 12})`;
     for (let k = 0; k < list.length; k += 3) actx.fillText(list[k], list[k + 1], list[k + 2]);
-  }
-  if (scanning) {
-    const grad = actx.createLinearGradient(0, ly - 90, 0, ly);
-    grad.addColorStop(0, 'rgba(191,227,255,0)'); grad.addColorStop(1, 'rgba(191,227,255,.1)');
-    actx.fillStyle = grad; actx.fillRect(0, ly - 90, W, 90);
-    actx.fillStyle = 'rgba(191,227,255,.85)'; actx.fillRect(0, ly, W, 1);
-
   }
 }
 

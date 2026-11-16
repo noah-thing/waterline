@@ -101,7 +101,7 @@ On Vercel the API refuses to scan until the Upstash store is connected, so limit
 
 - **Sealed browser.** All of Chromium's traffic goes through a proxy inside the function. Each host is resolved once, checked against private and reserved ranges, and the connection goes to that exact address, so redirects, iframes and DNS rebinding cannot reach internal services. QUIC is off and WebRTC cannot send UDP around the proxy.
 - **Keys stay on the server.** API keys live in encrypted environment variables and are never sent to the browser. The headless browser is started with a stripped environment that holds no keys.
-- **Fair use.** Four scans per person every ten minutes and twenty a day, one at a time, with a daily budget across everyone. People are told apart by a salted hash of their IP (IPv6 by /48), and nothing else is stored.
+- **Fair use.** Six scans per person every ten minutes and forty a day, one at a time, with a daily budget across everyone. People are told apart by a salted hash of their IP (IPv6 by /48), and nothing else is stored.
 - **Strict page.** A content security policy with no third-party scripts, styles or fonts, no framing, and every scan result written as text, never as HTML.
 
 Found a problem? Open an issue, or for anything sensitive, message [@fsconfig](https://x.com/fsconfig) on X.

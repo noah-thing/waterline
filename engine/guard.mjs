@@ -10,8 +10,8 @@ export const sharedStore = !!(RURL && RTOK);
 export const storeMissing = !!process.env.VERCEL && !sharedStore;
 
 export const LIMITS = {
-  burst: { n: Number(process.env.WL_BURST || 4), win: 600 },      // fresh scans per person per 10 min
-  daily: { n: Number(process.env.WL_DAILY || 20), win: 86400 },   // fresh scans per person per day
+  burst: { n: Number(process.env.WL_BURST || 6), win: 600 },      // fresh scans per person per 10 min
+  daily: { n: Number(process.env.WL_DAILY || 40), win: 86400 },   // fresh scans per person per day
   global: { n: Number(process.env.WL_GLOBAL || 1500), win: 86400 }, // all fresh scans per day (budget cap)
   hits: { n: 40, win: 600 },                                      // any request per person per 10 min
 };
