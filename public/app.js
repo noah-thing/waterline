@@ -168,10 +168,6 @@ function drawAscii(now, t) {
   const flickRate = scanning ? 0.014 : 0.003;
   const buckets = new Map();
   const D = dockRect;
-  // Sonar: rings leave the scan line every 1.3 s and travel through the water.
-  const pings = [];
-  if (scanning && !reduce) { const per = 1300; for (let k = 0; k < 3; k++) { const age = ((now + k * per) % (per * 3)) / (per * 3); pings.push({ r: age * Math.max(W, H) * 0.75, a: 1 - age }); } }
-  const pingX = W / 2;
 
   // The dissolving flank above the water.
   const up = grid.up, dz = dissolve();
@@ -202,17 +198,7 @@ function drawAscii(now, t) {
       const i = r * cols + c;
       let b = v[i];
       let chr = chars[i];
-      if (b < 0.035) {
-        if (!pings.length) continue;
-        const dd = Math.hypot(c * cw - pingX, (y - ly) * 1.6);
-        let hit = 0; for (const pg of pings) { const e = Math.abs(dd - pg.r); if (e < 10) hit = Math.max(hit, (1 - e / 10) * pg.a); }
-        if (hit < 0.15) continue;
-        b = 0.05; chr = hit > 0.6 ? '+' : hit > 0.35 ? ':' : '.';
-        const key0 = `23,28,31,${Math.max(1, Math.round(hit * 0.55 * 12))}`; // sounding colour >> 3
-        let l0 = buckets.get(key0); if (!l0) buckets.set(key0, l0 = []);
-        if (!(D && c * cw > D.l && c * cw < D.r && y > D.t && y < D.b)) l0.push(chr, c * cw, y);
-        continue;
-      }
+      if (b < 0.035) continue;
       if (!reduce) {
         if (flick[i] > now) chr = CODE[(i + (now / 90 | 0)) % CODE.length];
         else if (Math.random() < flickRate * b) flick[i] = now + 80 + Math.random() * 220;
@@ -261,10 +247,7 @@ function drawAscii(now, t) {
     grad.addColorStop(0, 'rgba(191,227,255,0)'); grad.addColorStop(1, 'rgba(191,227,255,.1)');
     actx.fillStyle = grad; actx.fillRect(0, ly - 90, W, 90);
     actx.fillStyle = 'rgba(191,227,255,.85)'; actx.fillRect(0, ly, W, 1);
-    const px = ((now / 1400) % 1) * W;
-    const pg = actx.createLinearGradient(px - 240, 0, px, 0);
-    pg.addColorStop(0, 'rgba(255,255,255,0)'); pg.addColorStop(1, 'rgba(255,255,255,.9)');
-    actx.fillStyle = pg; actx.fillRect(px - 240, ly - 1, 240, 3);
+
   }
 }
 
