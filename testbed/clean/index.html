@@ -1,0 +1,10 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Flappy Fish (clean)</title>
+<style>body{margin:0;background:#4ec0ca;font-family:sans-serif;display:grid;place-items:center;height:100vh}canvas{background:#70c5ce;border:4px solid #222}#start{position:absolute;padding:16px 40px;font-size:28px;background:#f7d51d;border:4px solid #222;cursor:pointer}</style></head>
+<body><canvas id="c" width="400" height="560"></canvas><button id="start">PLAY</button>
+<script>
+const c=document.getElementById('c'),x=c.getContext('2d');let y=280,v=0,run=false,t=0,score=0;
+function draw(){x.fillStyle='#70c5ce';x.fillRect(0,0,400,560);x.fillStyle='#ff0';x.beginPath();x.arc(120,y,16,0,7);x.fill();x.fillStyle='#2a2';x.fillRect(300-(t%400),0,50,200);x.fillRect(300-(t%400),360,50,200);x.fillStyle='#fff';x.font='32px sans-serif';x.fillText(score,190,60);}
+function loop(){if(run){v+=.4;y=Math.min(540,y+v);t+=2;if(t%400==0)score++;localStorage.setItem('best',score)}draw();requestAnimationFrame(loop)}loop();
+addEventListener('keydown',()=>v=-7);c.onclick=()=>v=-7;
+document.getElementById('start').onclick=()=>{run=true;document.getElementById('start').remove();navigator.clipboard&&0;};
+</script></body></html>

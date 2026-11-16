@@ -1,0 +1,21 @@
+{
+  "name": "waterline",
+  "version": "1.0.0",
+  "description": "Check if a link is safe before it goes on stream.",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "@sparticuz/chromium": "^153.0.0",
+    "@tensorflow/tfjs": "^4.22.0",
+    "@tensorflow/tfjs-backend-wasm": "^4.22.0",
+    "nsfwjs": "^4.3.0",
+    "playwright-core": "^1.65.1",
+    "sharp": "^0.35.5"
+  },
+  "private": "true"
+}

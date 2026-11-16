@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Waterline: check if a link is safe before it goes on stream</title>
+<meta name="description" content="Paste a link. Waterline opens it in a sealed browser, plays it, reads every script and image, and tells you if it is safe to open on stream.">
+<meta name="theme-color" content="#04070c">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Waterline">
+<meta property="og:title" content="Waterline: is this link safe to open on stream?">
+<meta property="og:description" content="Paste a link. Waterline plays it in a sealed browser, reads the code and every image, and answers before you click.">
+<meta property="og:image" content="/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Waterline: an iceberg split at the waterline, the submerged part drawn in ASCII.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:creator" content="@fsconfig">
+<meta name="twitter:title" content="Waterline: is this link safe to open on stream?">
+<meta name="twitter:description" content="It plays the link in a sealed browser and reads what is under the surface.">
+<meta name="twitter:image" content="/og.png">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" sizes="any">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="preload" href="/fonts/hanken.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/plex-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/assets/berg.jpg" as="image">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main>
+  <section class="hero" id="hero" data-state="idle" aria-label="Check a link">
+    <canvas id="photo" aria-hidden="true"></canvas>
+    <canvas id="ascii" aria-hidden="true"></canvas>
+    <h1 class="mark" id="mark" aria-label="Waterline"><span class="mark-text" id="markText" aria-hidden="true">Waterline</span></h1>
+
+    <div class="stream" id="stream" aria-hidden="true"></div>
+
+    <header class="bar">
+      <a class="logo" href="/" aria-label="Waterline home"><span>Waterline</span></a>
+      <p class="credit">
+        <span class="cw">Made by</span>
+        <a href="https://x.com/fsconfig" target="_blank" rel="noopener noreferrer"><img src="/assets/fsconfig.jpg" alt="" width="24" height="24"><span>@fsconfig</span><svg class="vf" viewBox="0 0 22 22" width="14" height="14" aria-label="Verified account" role="img"><path fill="#1D9BF0" d="M20.396 11c-.018-.646-.215-1.275-.57-1.816-.354-.54-.852-.972-1.438-1.246.223-.607.27-1.264.14-1.897-.131-.634-.437-1.218-.882-1.687-.47-.445-1.053-.75-1.687-.882-.633-.13-1.29-.083-1.897.14-.273-.587-.704-1.086-1.245-1.44S11.647 1.62 11 1.604c-.646.017-1.273.213-1.813.568s-.969.854-1.24 1.44c-.608-.223-1.267-.272-1.902-.14-.635.13-1.22.436-1.69.882-.445.47-.749 1.055-.878 1.688-.13.633-.08 1.29.144 1.896-.587.274-1.087.705-1.443 1.245-.356.54-.555 1.17-.574 1.817.02.647.218 1.276.574 1.817.356.54.856.972 1.443 1.245-.224.606-.274 1.263-.144 1.896.13.634.433 1.218.877 1.688.47.443 1.054.747 1.687.878.633.132 1.29.084 1.897-.136.274.586.705 1.084 1.246 1.439.54.354 1.17.551 1.816.569.647-.016 1.276-.213 1.817-.567s.972-.854 1.245-1.44c.604.239 1.266.296 1.903.164.636-.132 1.22-.447 1.68-.907.46-.46.776-1.044.908-1.681s.075-1.299-.165-1.903c.586-.274 1.084-.705 1.439-1.246.354-.54.551-1.17.569-1.816zM9.662 14.85l-3.429-3.428 1.293-1.302 2.072 2.072 4.4-4.794 1.347 1.246z"/></svg></a>
+        <span class="cw">for</span>
+        <a href="https://x.com/ashen_one" target="_blank" rel="noopener noreferrer"><img src="/assets/ashen_one.jpg" alt="" width="24" height="24"><span>@ashen_one</span><svg class="vf" viewBox="0 0 22 22" width="14" height="14" aria-label="Verified account" role="img"><path fill="#1D9BF0" d="M20.396 11c-.018-.646-.215-1.275-.57-1.816-.354-.54-.852-.972-1.438-1.246.223-.607.27-1.264.14-1.897-.131-.634-.437-1.218-.882-1.687-.47-.445-1.053-.75-1.687-.882-.633-.13-1.29-.083-1.897.14-.273-.587-.704-1.086-1.245-1.44S11.647 1.62 11 1.604c-.646.017-1.273.213-1.813.568s-.969.854-1.24 1.44c-.608-.223-1.267-.272-1.902-.14-.635.13-1.22.436-1.69.882-.445.47-.749 1.055-.878 1.688-.13.633-.08 1.29.144 1.896-.587.274-1.087.705-1.443 1.245-.356.54-.555 1.17-.574 1.817.02.647.218 1.276.574 1.817.356.54.856.972 1.443 1.245-.224.606-.274 1.263-.144 1.896.13.634.433 1.218.877 1.688.47.443 1.054.747 1.687.878.633.132 1.29.084 1.897-.136.274.586.705 1.084 1.246 1.439.54.354 1.17.551 1.816.569.647-.016 1.276-.213 1.817-.567s.972-.854 1.245-1.44c.604.239 1.266.296 1.903.164.636-.132 1.22-.447 1.68-.907.46-.46.776-1.044.908-1.681s.075-1.299-.165-1.903c.586-.274 1.084-.705 1.439-1.246.354-.54.551-1.17.569-1.816zM9.662 14.85l-3.429-3.428 1.293-1.302 2.072 2.072 4.4-4.794 1.347 1.246z"/></svg></a>
+      </p>
+      <nav>
+        <a href="#under">How it works</a>
+        <a class="gh" href="https://github.com/noah-thing/waterline" target="_blank" rel="noopener noreferrer" aria-label="Waterline on GitHub"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+        <span class="pin-wrap"><button class="pin" id="pin" type="button"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 1h6v10L6 8.5 3 11Z" fill="none" stroke="currentColor"/></svg><span>Pin Waterline</span></button>
+        <span class="pin-tip" id="pinTip" role="status" hidden></span></span>
+      </nav>
+    </header>
+
+    <span class="crop tl" aria-hidden="true"></span><span class="crop tr" aria-hidden="true"></span>
+    <span class="crop bl" aria-hidden="true"></span><span class="crop br" aria-hidden="true"></span>
+
+    <div class="wire" id="wire" aria-hidden="true"></div>
+
+    <div class="dock" id="dock">
+      <p class="lede">Check if a link is safe before it goes on stream.</p>
+      <form id="form" autocomplete="off" novalidate>
+        <label class="sr" for="url">Link to check</label>
+        <input id="url" name="url" type="url" inputmode="url" spellcheck="false" placeholder="Paste a link: game, site, anything" maxlength="2048" required>
+        <button id="go" type="submit"><span id="goLabel">Check</span></button>
+      </form>
+      <ol class="log" id="log" role="status" aria-live="polite"><li class="hint">Opens it sealed. Plays it. Reads what is under the surface.</li></ol>
+      <div class="film" id="film" aria-hidden="true"></div>
+    </div>
+
+    <div class="report" id="report" hidden>
+      <div class="rp-a">
+        <p class="tag"><span>[ Verdict ]</span><b id="rpWord"></b></p>
+        <p class="r-head" id="rHead"></p>
+        <p class="r-line" id="rLine"></p>
+        <p class="r-url" id="rUrl"></p>
+        <dl class="nums" id="nums"></dl>
+        <button id="again" type="button">Check another link</button>
+      </div>
+      <div class="rp-b">
+        <p class="tag"><span>[ Sounding report ]</span><b id="rpTime"></b></p>
+        <ol class="rows" id="rows"></ol>
+        <div class="strip-wrap" id="stripWrap"><p class="tag"><span>[ Frames, pixelated ]</span></p><div class="strip" id="strip"></div></div>
+      </div>
+    </div>
+
+    <p class="foot fl" aria-hidden="true">Chromium · NSFWJS · Jev · DeepSeek</p>
+    <p class="foot fr" aria-hidden="true">[N° 001] / Link sounding</p>
+  </section>
+
+  <section class="under" id="under" aria-labelledby="underTitle">
+    <header class="u-head">
+      <p class="tag"><span>[ 02 ]</span><span>Under the waterline</span></p>
+      <h2 id="underTitle">Six depths before you click.</h2>
+      <p class="u-lede">A link looks harmless at the surface. Waterline goes under: it opens the link, plays it, reads everything it loads, then has two AI models confirm what it found.</p>
+    </header>
+    <div class="u-body">
+      <figure class="section-art" aria-hidden="true"><pre id="crossSection"></pre><figcaption>[ Cross-section ] Submerged mass, 1 char = 12 px</figcaption></figure>
+      <ol class="u-list" id="uList">
+        <li><span class="d">000 m</span><h3>Address</h3><p>Unwraps short links and checks for look-alike names, private networks, known adult hosts and brand-new domains.</p></li>
+        <li><span class="d">100 m</span><h3>Render</h3><p>Opens the link in a sealed headless browser. It cannot download files, use a camera or reach a private network.</p></li>
+        <li><span class="d">200 m</span><h3>Play</h3><p>Presses Play, taps and mashes the usual keys, then fast-forwards the clock seven minutes to set off anything on a timer.</p></li>
+        <li><span class="d">300 m</span><h3>Code</h3><p>Reads every script for ClickFix commands, crypto miners, IP loggers, data-stealing webhooks and adult links.</p></li>
+        <li><span class="d">400 m</span><h3>Images</h3><p>Checks every frame and every image the code could load, including pictures hidden inside the code itself.</p></li>
+        <li><span class="d">500 m</span><h3>Judge</h3><p>Sends anything flagged to Jev and DeepSeek to confirm or clear, so ordinary games do not get flagged.</p></li>
+      </ol>
+    </div>
+    <dl class="limits">
+      <div><dt>[ Fair use ]</dt><dd>4 checks per person every 10 minutes, 20 a day.</dd></div>
+      <div><dt>[ Kept ]</dt><dd>Only a 10-minute cache of results, so a link pasted by a whole chat costs one check.</dd></div>
+      <div><dt>[ Shown ]</dt><dd>Captured frames only ever appear pixelated, so nothing explicit reaches the stream.</dd></div>
+    </dl>
+    <footer class="foot2">
+      <span>Waterline</span>
+      <span>Made by <a href="https://x.com/fsconfig" target="_blank" rel="noopener noreferrer">@fsconfig</a> for <a href="https://x.com/ashen_one" target="_blank" rel="noopener noreferrer">@ashen_one</a></span>
+      <span>A second opinion, not a guarantee.</span>
+    </footer>
+  </section>
+</main>
+<script type="module" src="/app.js"></script>
+</body>
+</html>
