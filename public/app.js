@@ -61,15 +61,7 @@ function drawPhoto() {
   const { s, x, y, wlY } = geo, iw = IMG_W * s, ih = IMG_H * s;
   pctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   pctx.fillStyle = '#04070c'; pctx.fillRect(0, 0, W, H);
-  // Ambient light: a blurred copy fills the whole frame, so the light never stops at an edge.
-  const cs = Math.max(W / IMG_W, H / IMG_H) * 1.2;
-  pctx.save(); pctx.filter = 'blur(56px)'; pctx.globalAlpha = 0.5;
-  pctx.drawImage(img, (W - IMG_W * cs) / 2, wlY - WL * cs, IMG_W * cs, IMG_H * cs); pctx.restore();
-  // Where the flank dissolves, the water and sky stay dark rather than showing the glow.
-  { const d0 = dissolve(); const g0 = pctx.createLinearGradient(d0.x0 - 120, 0, d0.x1, 0);
-    g0.addColorStop(0, 'rgba(4,7,12,0)'); g0.addColorStop(0.35, 'rgba(4,7,12,.88)'); g0.addColorStop(1, 'rgba(4,7,12,0)');
-    pctx.fillStyle = g0; pctx.fillRect(d0.x0 - 120, 0, d0.x1 - d0.x0 + 120, wlY); }
-  // The photo itself, edges faded into the ambient, left flank dissolved for the ASCII.
+  // The photo, its edges faded into the dark ground, its left flank dissolved for the ASCII.
   const off = document.createElement('canvas'); off.width = photo.width; off.height = photo.height;
   const o = off.getContext('2d'); o.setTransform(dpr, 0, 0, dpr, 0, 0);
   o.drawImage(img, x, y, iw, ih);
@@ -337,7 +329,7 @@ function pushWire(ev) {
 // ── Live log under the field ───────────────────────────────
 const log = $('#log');
 function logLine(text, stamp, cls = '') {
-  const li = document.createElement('li'); if (cls) li.className = cls;
+  const li = document.createElement('div'); if (cls) li.className = cls;
   if (stamp) { const i = document.createElement('i'); i.textContent = stamp; li.appendChild(i); }
   const span = document.createElement('span'); li.appendChild(span);
   log.appendChild(li);
@@ -345,7 +337,7 @@ function logLine(text, stamp, cls = '') {
   if (reduce) { span.textContent = text; return; }
   let n = 0; const tw = setInterval(() => { n += 2; span.textContent = text.slice(0, n); if (n >= text.length) clearInterval(tw); }, 14);
 }
-function logReset(text, cls = 'hint') { log.textContent = ''; const li = document.createElement('li'); li.className = cls; li.textContent = text; log.appendChild(li); }
+function logReset(text, cls = 'hint') { log.textContent = ''; const li = document.createElement('div'); li.className = cls; li.textContent = text; log.appendChild(li); }
 
 // ── Filmstrip ──────────────────────────────────────────────
 const film = $('#film');

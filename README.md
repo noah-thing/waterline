@@ -106,7 +106,7 @@ On Vercel the API refuses to scan until the Upstash store is connected, so limit
 
 Found a problem? Open an issue, or for anything sensitive, message [@fsconfig](https://x.com/fsconfig) on X.
 
-Waterline is a second opinion, not a guarantee. When in doubt, don't open it live.
+
 
 ## License
 
