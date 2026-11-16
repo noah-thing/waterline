@@ -1,0 +1,19 @@
+@font-face { font-family: "Hanken Grotesk"; src: url(/fonts/hanken.woff2) format("woff2"); font-weight: 100 900; }
+@font-face { font-family: "Plex Mono"; src: url(/fonts/plex-400.woff2) format("woff2"); }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #04070c; color: #eef3f7; font: 400 15px/1.5 "Hanken Grotesk", sans-serif; padding: 56px 48px; }
+.tag { font: 12px/1 "Plex Mono", monospace; letter-spacing: .1em; text-transform: uppercase; color: #9db1c4; }
+h1 { margin-top: 14px; font: 500 40px/1.05 "Hanken Grotesk", sans-serif; letter-spacing: -.03em; }
+.lede { margin-top: 10px; color: #9db1c4; max-width: 70ch; }
+.sum { display: grid; grid-template-columns: repeat(5, 1fr); margin-top: 32px; border-top: 1px solid rgba(157,177,196,.22); border-bottom: 1px solid rgba(157,177,196,.22); }
+.sum div { padding: 16px 16px 16px 0; } .sum div + div { padding-left: 16px; border-left: 1px solid rgba(157,177,196,.22); }
+.sum dt { font: 11px/1 "Plex Mono", monospace; letter-spacing: .08em; text-transform: uppercase; color: #9db1c4; }
+.sum dd { margin-top: 8px; font: 500 30px/1 "Hanken Grotesk", sans-serif; font-variant-numeric: tabular-nums; }
+.wrap { margin-top: 32px; overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font: 13px/1.4 "Plex Mono", monospace; font-variant-numeric: tabular-nums; }
+th, td { padding: 10px 14px 10px 0; text-align: right; border-bottom: 1px solid rgba(157,177,196,.16); white-space: nowrap; }
+th:first-child { text-align: left; }
+thead th { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: #9db1c4; font-weight: 400; }
+tbody th { font-weight: 400; color: #9db1c4; }
+.z { color: #5d738a; }
+@media (max-width: 760px) { body { padding: 32px 18px; } .sum { grid-template-columns: 1fr 1fr; } .sum div:nth-child(odd) { border-left: 0; padding-left: 0; } }

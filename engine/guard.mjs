@@ -92,3 +92,25 @@ export async function cachePut(url, value, sec = 600) {
     await redis([['SET', ckey(url), JSON.stringify(value), 'EX', String(sec)]]);
   } catch {}
 }
+
+// Daily usage counters for the private stats page. Only counts and a HyperLogLog of
+// the salted visitor hashes are kept (no IPs, no links), for 90 days.
+const day = () => new Date().toISOString().slice(0, 10);
+export function stat(fields, id) {
+  if (!sharedStore) return;
+  const k = `wl:s:${day()}`, cmds = [];
+  for (const f of [].concat(fields)) cmds.push(['HINCRBY', k, f, '1']);
+  cmds.push(['EXPIRE', k, String(90 * 86400)]);
+  if (id) cmds.push(['PFADD', `wl:p:${day()}`, id], ['EXPIRE', `wl:p:${day()}`, String(90 * 86400)]);
+  redis(cmds).catch(() => {});
+}
+export async function readStats(days = 30) {
+  if (!sharedStore) return [];
+  const ds = Array.from({ length: days }, (_, i) => new Date(Date.now() - i * 864e5).toISOString().slice(0, 10));
+  const res = await redis(ds.flatMap(d => [['HGETALL', `wl:s:${d}`], ['PFCOUNT', `wl:p:${d}`]]));
+  return ds.map((d, i) => {
+    const flat = res[i * 2] || [], o = {};
+    for (let j = 0; j < flat.length; j += 2) o[flat[j]] = Number(flat[j + 1]);
+    return { day: d, people: res[i * 2 + 1] || 0, ...o };
+  });
+}

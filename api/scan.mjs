@@ -1,7 +1,7 @@
 // POST /api/scan  { url }  → streamed NDJSON: stage, log, frame events, then one result.
 import { scan } from '../engine/scanner.mjs';
 import { normalizeUrl } from '../engine/intel.mjs';
-import { storeMissing, clientId, checkHit, reserveScan, lock, unlock, cacheGet, cachePut } from '../engine/guard.mjs';
+import { stat, storeMissing, clientId, checkHit, reserveScan, lock, unlock, cacheGet, cachePut } from '../engine/guard.mjs';
 
 export const config = { maxDuration: 120 };
 
@@ -36,12 +36,12 @@ function fail(res, status, error, extra = {}) {
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') { res.setHeader('allow', 'POST'); return fail(res, 405, 'Use POST.'); }
-  if (!sameOrigin(req) || req.headers['x-waterline'] !== '1') return fail(res, 403, 'Scans can only be started from the Waterline page.');
+  if (!sameOrigin(req) || req.headers['x-waterline'] !== '1') { stat('refused_offsite'); return fail(res, 403, 'Scans can only be started from the Waterline page.'); }
   if (!/^application\/json/i.test(req.headers['content-type'] || '')) return fail(res, 415, 'Send JSON.');
 
   if (storeMissing) return fail(res, 503, 'Waterline is not fully set up yet. Try again soon.');
   const id = clientId(req);
-  try { const hit = await checkHit(id); if (hit) return fail(res, 429, 'Too many requests. Slow down a little.', hit); }
+  try { const hit = await checkHit(id); if (hit) { stat('limited_requests', id); return fail(res, 429, 'Too many requests. Slow down a little.', hit); } }
   catch { return fail(res, 503, 'Busy right now. Try again in a minute.'); }
 
   let url;
@@ -61,14 +61,14 @@ export default async function handler(req, res) {
   };
   const send = o => { try { res.write(JSON.stringify(o) + '\n'); } catch {} };
 
-  if (cached) { startStream(); send({ type: 'result', cached: true, ...cached }); return res.end(); }
+  if (cached) { stat(['checks', 'cached', `v_${cached.verdict}`], id); startStream(); send({ type: 'result', cached: true, ...cached }); return res.end(); }
 
   let locked;
   try { locked = await lock(id); } catch { return fail(res, 503, 'Busy right now. Try again in a minute.', { retry: 30 }); }
-  if (!locked) return fail(res, 429, 'You already have a scan running. Wait for it to finish.', { retry: 15 });
+  if (!locked) { stat('limited_running', id); return fail(res, 429, 'You already have a scan running. Wait for it to finish.', { retry: 15 }); }
   try {
     let limited; try { limited = await reserveScan(id); } catch { limited = { reason: 'Busy right now. Try again in a minute.', retry: 60 }; }
-    if (limited) return fail(res, 429, limited.reason, { retry: limited.retry });
+    if (limited) { stat(/budget/.test(limited.reason) ? 'limited_budget' : 'limited_person', id); return fail(res, 429, limited.reason, { retry: limited.retry }); }
 
     startStream();
     send({ type: 'start', url });
@@ -80,10 +80,12 @@ export default async function handler(req, res) {
     try { result = await scan(url, { emit: send, signal: ac.signal, allowLocal: process.env.WL_ALLOW_LOCAL === '1' && !process.env.VERCEL }); }
     finally { clearTimeout(timer); }
     if (result.verdict !== 'unknown') await cachePut(url, result);
+    stat(['checks', 'scans', `v_${result.verdict}`].concat(result.stats?.partial?.length ? ['partial'] : []), id);
     send({ type: 'result', ...result });
   } catch (e) {
     const msg = SAFE_ERRORS.test(e.message) ? e.message : (e.message === 'scan-timeout' ? 'The page took too long to check.' : 'Something went wrong while checking that link.');
     if (!res.headersSent) fail(res, 400, msg); else send({ type: 'error', error: msg });
+    stat(e.message === 'scan-timeout' ? 'timeouts' : 'errors');
     if (!SAFE_ERRORS.test(e.message)) console.error('scan failed', e?.message?.slice(0, 200));
   } finally {
     await unlock(id);
