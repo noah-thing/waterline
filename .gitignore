@@ -5,3 +5,4 @@ node_modules
 .vercel
 public/assets/berg-raw.png
 .DS_Store
+.env*

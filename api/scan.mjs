@@ -72,6 +72,8 @@ export default async function handler(req, res) {
     send({ type: 'start', url });
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), 100000);
+    // If the visitor closes or reloads the page, stop the scan and free their slot.
+    res.on('close', () => { if (!res.writableEnded) ac.abort(); });
     let result;
     try { result = await scan(url, { emit: send, signal: ac.signal, allowLocal: process.env.WL_ALLOW_LOCAL === '1' && !process.env.VERCEL }); }
     finally { clearTimeout(timer); }

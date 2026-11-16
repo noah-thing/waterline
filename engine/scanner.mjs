@@ -52,6 +52,9 @@ const HOOKS = `(() => {
   try { if (navigator.serviceWorker) navigator.serviceWorker.register = () => { L('sw', ''); return Promise.reject(new Error('blocked')); }; } catch {}
 })();`;
 
+// Ad and tracking networks: never the threat to a stream, and the main cause of slow scans.
+const ADS = /(?:^|\.)(?:doubleclick\.net|googlesyndication\.com|googleadservices\.com|adservice\.google\.[a-z.]+|amazon-adsystem\.com|adnxs\.com|taboola\.com|outbrain\.com|criteo\.(?:com|net)|pubmatic\.com|rubiconproject\.com|openx\.net|casalemedia\.com|moatads\.com|scorecardresearch\.com|quantserve\.com|adsrvr\.org|3lift\.com|sharethrough\.com|indexww\.com|smartadserver\.com|teads\.tv|yieldmo\.com|media\.net|bidswitch\.net|lijit\.com|sovrn\.com|33across\.com|gumgum\.com|contextweb\.com|adform\.net|onetag-sys\.com|sonobi\.com|kargo\.com|ezoic\.net|ezojs\.com|mediavine\.com|adthrive\.com|hotjar\.com|clarity\.ms|id5-sync\.com|rlcdn\.com|bluekai\.com|demdex\.net|krxd\.net|adsafeprotected\.com|doubleverify\.com|imasdk\.googleapis\.com|prebid[a-z.-]*)$/i;
+
 const PLAY_RE = /^\s*(?:play(?: now| game)?|start(?: game)?|begin|go!?|enter|new game|tap to (?:play|start)|click to (?:play|start)|press (?:start|space|any key)|let'?s go|run game|launch)\s*[!>▶►]?\s*$/i;
 
 // Resolve to fallback if a page call hangs (a page can spin forever).
@@ -101,6 +104,7 @@ export async function scan(input, { emit = () => {}, allowLocal = false, signal 
       let u; try { u = new URL(req.url()); } catch { return route.abort(); }
       if (u.protocol === 'data:' || u.protocol === 'blob:') return route.continue();
       if (!/^https?:$/.test(u.protocol)) return route.abort();
+      if (ADS.test(u.hostname)) { stats.ads = (stats.ads || 0) + 1; return route.abort('blockedbyclient'); }
       if (++stats.requests > LIMITS.requests) return route.abort();
       if (!(await allowedHost(u.hostname))) { stats.blocked++; return route.abort('blockedbyclient'); }
       stats.hosts.add(u.hostname);
@@ -158,7 +162,7 @@ export async function scan(input, { emit = () => {}, allowLocal = false, signal 
 
     const grab = async label => {
       if (frames.length >= LIMITS.frames) return;
-      const buf = await page.screenshot({ type: 'jpeg', quality: 70, timeout: 5000 }).catch(() => null);
+      const buf = await page.screenshot({ type: 'jpeg', quality: 62, timeout: 3500, animations: 'allow', caret: 'initial' }).catch(() => null);
       if (!buf) return;
       const small = await sharp(buf, { animated: false, limitInputPixels: 25e6 }).resize(16, 10, { fit: 'fill' }).greyscale().raw().toBuffer();
       if (frames.some(f => f.small.reduce((s, v, i) => s + Math.abs(v - small[i]), 0) / small.length < 3)) return;
@@ -170,19 +174,32 @@ export async function scan(input, { emit = () => {}, allowLocal = false, signal 
     emit({ type: 'stage', id: 'play' });
     await grab('First screen');
     if (!loadError) {
-      const clicked = [];
-      for (let round = 0; round < 2; round++) {
-        for (const fr of page.frames()) {
-          const loc = fr.locator('button, a, [role=button], input[type=button], input[type=submit], div, span, p, h1, h2, h3').filter({ hasText: PLAY_RE });
-          const n = Math.min(await within(loc.count(), 2000, 0), 4);
-          for (let i = n - 1; i >= 0 && clicked.length < 3; i--) {
-            const el = loc.nth(i);
-            if (!(await el.isVisible().catch(() => false))) continue;
-            const txt = ((await el.innerText().catch(() => '')) || '').trim().slice(0, 30);
-            if (await el.click({ timeout: 1500 }).then(() => true).catch(() => false)) { clicked.push(txt); say('play', `Clicked "${txt}"`); await page.waitForTimeout(900); break; }
-          }
+      // Find a Play / Start button with one quick in-page search per frame (main page plus the
+      // biggest embedded frames, where hosted games live), then click it like a mouse would.
+      const findPlay = fr => within(fr.evaluate(src => {
+        const re = new RegExp(src, 'i');
+        for (const e of document.querySelectorAll('button,a,[role=button],input[type=button],input[type=submit],div,span,p,h1,h2,h3')) {
+          const t = (e.innerText || e.value || '').trim();
+          if (!t || t.length > 30 || !re.test(t)) continue;
+          const r = e.getBoundingClientRect(); if (r.width < 8 || r.height < 8 || r.bottom < 0 || r.top > innerHeight) continue;
+          const st = getComputedStyle(e); if (st.visibility === 'hidden' || st.display === 'none' || +st.opacity === 0) continue;
+          return { x: r.x + r.width / 2, y: r.y + r.height / 2, t: t.slice(0, 30) };
         }
-        await grab(clicked.length ? `After "${clicked.at(-1)}"` : 'Idle');
+        return null;
+      }, PLAY_RE.source), 1500, null);
+      const frameBox = fr => fr === page.mainFrame() ? Promise.resolve({ x: 0, y: 0, width: 1280, height: 800 }) : within(fr.frameElement().then(h => h.boundingBox()), 1000, null);
+      const clicked = [];
+      for (let round = 0; round < 2 && clicked.length < 2; round++) {
+        const cands = [];
+        for (const fr of page.frames().slice(0, 12)) { const bx = await frameBox(fr); if (bx && bx.width >= 200 && bx.height >= 150) cands.push({ fr, bx }); }
+        cands.sort((a, b) => (b.fr === page.mainFrame()) - (a.fr === page.mainFrame()) || b.bx.width * b.bx.height - a.bx.width * a.bx.height);
+        for (const { fr, bx } of cands.slice(0, 4)) {
+          const hit = await findPlay(fr);
+          if (!hit) continue;
+          await page.mouse.click(bx.x + hit.x, bx.y + hit.y).catch(() => {});
+          clicked.push(hit.t); say('play', `Clicked "${hit.t}"`); await page.waitForTimeout(800); break;
+        }
+        if (round === 0) await grab(clicked.length ? `After "${clicked.at(-1)}"` : 'Idle');
       }
       // Canvas games: tap the biggest canvas and mash the usual keys.
       const box = await within(page.evaluate(() => {
@@ -196,8 +213,8 @@ export async function scan(input, { emit = () => {}, allowLocal = false, signal 
       for (let i = 0; i < 8; i++) {
         await page.mouse.click(target.x, target.y).catch(() => {});
         await page.keyboard.press(keys[i]).catch(() => {});
-        await page.waitForTimeout(450);
-        if (i % 2 === 1) await grab(`Playing ${Math.round((Date.now() - t0) / 1000)}s`);
+        await page.waitForTimeout(350);
+        if (i === 3 || i === 7) await grab(`Playing ${Math.round((Date.now() - t0) / 1000)}s`);
       }
       // Payloads that wait (setTimeout 60s, "after 3 deaths"...): jump the clock forward.
       try { await page.clock.fastForward('02:00'); say('play', 'Fast-forwarded 2 minutes of timers'); } catch {}
@@ -274,12 +291,20 @@ export async function scan(input, { emit = () => {}, allowLocal = false, signal 
     stats.images = images.size;
     say('images', `Classifying ${images.size} images and ${frames.length} frames`);
     const imageCands = [];
+    // Only real pictures go to the image model: icons and tracking pixels are skipped, largest first.
+    const sized = [];
     for (const im of images.values()) {
+      const m = await sharp(im.buf, { animated: false, limitInputPixels: 25e6 }).metadata().catch(() => null);
+      if (m?.width >= 96 && m?.height >= 96) sized.push({ im, px: m.width * m.height });
+    }
+    sized.sort((a, b) => b.px - a.px);
+    for (const { im } of sized.slice(0, 28)) {
       const s = await classify(im.buf, { tiles: false }).catch(() => null);
       if (s && (s.explicit >= 0.3 || s.sexy >= 0.6)) imageCands.push({ ...im, score: s });
     }
     const frameScores = [];
-    for (const f of frames) frameScores.push(await classify(f.buf, { tiles: true }).catch(() => null));
+    // With Jev looking at every whole frame, the local model checks frames once; without Jev it also checks tiles.
+    for (const f of frames) frameScores.push(await classify(f.buf, { tiles: !hasJev() }).catch(() => null));
     imageCands.sort((a, b) => b.score.explicit - a.score.explicit);
     say('images', imageCands.length ? `${imageCands.length} images need a second look` : 'No image looks explicit to the local model');
 
