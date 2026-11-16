@@ -8,7 +8,7 @@ import net from 'node:net';
 import sharp from 'sharp';
 import { normalizeUrl, guardHost, urlShape, domainAge, safeBrowsing, isPrivateIp } from './intel.mjs';
 import { scanCode, scanText, extractDataImages, extractImageUrls, isAdultHost, maskHost, isExecutable, IP_LOGGERS } from './rules.mjs';
-import { classify } from './nsfw.mjs';
+import { classify, backendName, warm } from './nsfw.mjs';
 import { startProxy, safeGet } from './egress.mjs';
 import { reviewImages, reviewFindings, reviewText, deepRead, hasJev, hasDeepSeek } from './judge.mjs';
 
@@ -62,6 +62,12 @@ const within = (p, ms, fallback) => Promise.race([Promise.resolve(p).catch(() =>
 
 export async function scan(input, { emit = () => {}, allowLocal = false, signal } = {}) {
   const t0 = Date.now();
+  // Time budget: a slow page never ends in an error. Each stage stops collecting at its
+  // mark and the verdict is given on what was read; the report says the check was partial.
+  const modelReady = warm().catch(() => null); // load the image model while the browser works
+  const MARK = { play: 38000, fetch: 48000, images: 64000, deep: 72000 };
+  const past = k => Date.now() - t0 > MARK[k];
+  const cut = what => { if (!stats.partial) stats.partial = []; if (!stats.partial.includes(what)) stats.partial.push(what); };
   const say = (stage, text) => emit({ type: 'log', stage, text, t: Date.now() - t0 });
   const findings = [];
   const add = f => { if (!findings.some(x => x.rule === f.rule && x.where === f.where)) findings.push(f); };
@@ -149,7 +155,13 @@ export async function scan(input, { emit = () => {}, allowLocal = false, signal 
       if (resp && resp.status() >= 400) say('render', `Server answered ${resp.status()}`);
       await page.waitForLoadState('load', { timeout: 9000 }).catch(() => {});
       await page.waitForTimeout(1200);
-    } catch (e) { if (process.env.WL_DEBUG) console.error('goto', e.message.slice(0, 400)); loadError = /timeout/i.test(e.message) ? 'The page took too long to load.' : 'The page could not be opened.'; }
+    } catch (e) {
+      if (process.env.WL_DEBUG) console.error('goto', e.message.slice(0, 400));
+      // Slow but partly there: keep going on what loaded. Only an empty page counts as not checked.
+      const got = /timeout/i.test(e.message) && page.url() !== 'about:blank' && (await within(page.evaluate(() => (document.body?.innerHTML || '').length), 3000, 0)) > 200;
+      if (got) cut('the rest of a slow page load');
+      else loadError = /timeout/i.test(e.message) ? 'The page took too long to load.' : 'The page could not be opened.';
+    }
     finalUrl = page.url();
     title = await within(page.title(), 3000, '');
     say('render', `${stats.requests} requests from ${stats.hosts.size} hosts`);
@@ -160,9 +172,12 @@ export async function scan(input, { emit = () => {}, allowLocal = false, signal 
       if (!(await allowedHost(final.hostname))) throw new Error('That link redirects into a private network.');
     }
 
+    let cdp = null;
     const grab = async label => {
       if (frames.length >= LIMITS.frames) return;
-      const buf = await page.screenshot({ type: 'jpeg', quality: 62, timeout: 3500, animations: 'allow', caret: 'initial' }).catch(() => null);
+      let buf = null;
+      try { cdp ||= await page.context().newCDPSession(page); const r = await within(cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 60 }), 4000, null); if (r?.data) buf = Buffer.from(r.data, 'base64'); } catch {}
+      if (!buf) buf = await page.screenshot({ type: 'jpeg', quality: 60, timeout: 3000, animations: 'allow', caret: 'initial' }).catch(() => null);
       if (!buf) return;
       const small = await sharp(buf, { animated: false, limitInputPixels: 25e6 }).resize(16, 10, { fit: 'fill' }).greyscale().raw().toBuffer();
       if (frames.some(f => f.small.reduce((s, v, i) => s + Math.abs(v - small[i]), 0) / small.length < 3)) return;
@@ -217,6 +232,7 @@ export async function scan(input, { emit = () => {}, allowLocal = false, signal 
         if (i === 3 || i === 7) await grab(`Playing ${Math.round((Date.now() - t0) / 1000)}s`);
       }
       // Payloads that wait (setTimeout 60s, "after 3 deaths"...): jump the clock forward.
+      if (past('play')) cut('play');
       try { await page.clock.fastForward('02:00'); say('play', 'Fast-forwarded 2 minutes of timers'); } catch {}
       await page.waitForTimeout(900);
       await grab('After 2 min (fast-forward)');
@@ -275,21 +291,24 @@ export async function scan(input, { emit = () => {}, allowLocal = false, signal 
     say('code', `${codeFindings.length} pattern matches in code`);
 
     // Images the code references but the session never showed.
-    const fetchList = [...laterUrls].slice(0, 40);
+    const fetchList = past('fetch') ? [] : [...laterUrls].slice(0, 40);
+    if (laterUrls.size && !fetchList.length) cut('images the code loads later');
     if (fetchList.length) say('images', `Fetching ${fetchList.length} images the code can load later`);
-    await Promise.all(fetchList.map(async u => {
+    await within(Promise.all(fetchList.map(async u => {
       try {
         const buf = await safeGet(u, { allowLocal, maxBytes: LIMITS.imageBytes });
         if (!buf || buf.length < 600) return;
         const h = sha(buf); if (![...images.values()].some(i => i.hash === h)) images.set(u, { url: u, buf, hash: h, later: true });
       } catch {}
-    }));
+    })), 8000, null);
     for (const hi of hiddenImages) { const h = sha(hi.buf); images.set('data:' + h.slice(0, 10), { url: hi.where, buf: hi.buf, hash: h, hidden: true }); }
 
     // 05 — look at every picture
     emit({ type: 'stage', id: 'images' });
     stats.images = images.size;
-    say('images', `Classifying ${images.size} images and ${frames.length} frames`);
+    await within(modelReady, 10000, null);
+    const fast = backendName() === 'wasm';
+    say('images', `Classifying ${images.size} images and ${frames.length} frames (${fast ? 'wasm' : 'cpu'})`);
     const imageCands = [];
     // Only real pictures go to the image model: icons and tracking pixels are skipped, largest first.
     const sized = [];
@@ -298,7 +317,8 @@ export async function scan(input, { emit = () => {}, allowLocal = false, signal 
       if (m?.width >= 96 && m?.height >= 96) sized.push({ im, px: m.width * m.height });
     }
     sized.sort((a, b) => b.px - a.px);
-    for (const { im } of sized.slice(0, 28)) {
+    for (const { im } of sized.slice(0, fast ? 28 : 10)) {
+      if (past('images')) { cut('some images'); break; }
       const s = await classify(im.buf, { tiles: false }).catch(() => null);
       if (s && (s.explicit >= 0.3 || s.sexy >= 0.6)) imageCands.push({ ...im, score: s });
     }
@@ -372,7 +392,7 @@ export async function scan(input, { emit = () => {}, allowLocal = false, signal 
         const m = serious.find(f => f._script === s); const idx = Math.max(0, s.text.indexOf((m?.excerpt || '').slice(20, 60)) - 2500);
         return { where: s.url, code: s.text.slice(idx, idx + 6000) };
       });
-      const v = pick.length ? await deepRead(pick) : null;
+      const v = pick.length && !past('deep') ? await deepRead(pick) : null;
       // DeepSeek can add a finding, never remove one.
       if (v?.verdict === 'benign') say('judge', 'DeepSeek read the script as harmless');
       else if (v?.verdict === 'malicious') {
@@ -381,9 +401,9 @@ export async function scan(input, { emit = () => {}, allowLocal = false, signal 
     }
 
     if (stats.capped) add({ rule: 'capped', severity: 'info', category: 'context', title: 'Very large page', detail: 'Some files were read only in part because the page is unusually big.', source: 'observed' });
-    const age = await agePromise;
+    const age = await within(agePromise, 3000, null);
     if (age?.days != null && age.days < 14) add({ rule: 'new-domain', severity: 'info', category: 'context', title: 'Brand-new domain', detail: `${age.domain} was registered ${age.days} day${age.days === 1 ? '' : 's'} ago.`, source: 'observed' });
-    const sb = await safeBrowsing([url.href, finalUrl]);
+    const sb = await within(safeBrowsing([url.href, finalUrl]), 5000, null);
     if (sb?.length) add({ rule: 'safebrowsing', severity: 'block', category: 'malware', title: 'On Google’s unsafe list', detail: `Google Safe Browsing lists this as ${sb[0].threatType.toLowerCase().replace(/_/g, ' ')}.`, source: 'observed' });
 
     const out = verdict({ findings, loadError, url, finalUrl, title, stats, age, judged, thumbs, frames, t0 });
@@ -409,11 +429,14 @@ function verdict({ findings, loadError, url, finalUrl, title, stats, age, judged
   else if (loadError) { v = 'unknown'; headline = 'Could not check this link.'; line = loadError; }
   else if (warns.length) { v = 'caution'; headline = 'Look before you open it live.'; line = warns[0].title + (warns.length > 1 ? `, and ${warns.length - 1} more.` : '.'); }
   else { v = 'safe'; headline = 'Safe to open on stream.'; line = 'Nothing explicit, hostile or sneaky turned up after playing it.'; }
+  // A slow page still gets an answer; the verdict says it was judged on part of the page.
+  if (stats.partial?.length && v !== 'unknown') line = `Checked in part (the page was slow, so it skipped ${stats.partial.join(' and ')}). ` + line;
+  if (stats.partial?.length && v === 'safe') headline = 'Looks safe to open on stream.';
   return {
     verdict: v, headline, line, url: safeUrl(url.href), finalUrl: safeUrl(finalUrl),
     findings: findings.map(({ rule, severity, category, title, detail, excerpt, ai, source }) => ({ rule, severity, category, title, detail, excerpt: category === 'nsfw' ? undefined : excerpt, ai, source })),
     stats: { requests: stats.requests, blocked: stats.blocked, hosts: stats.hosts.size, scripts: stats.scripts, mb: +(stats.scriptBytes / 1e6).toFixed(2),
-      images: stats.images, frames: stats.frames, cleared: judged.filter(j => j.cleared).length, domainDays: age?.days ?? null, seconds: +((Date.now() - t0) / 1000).toFixed(1),
+      images: stats.images, frames: stats.frames, partial: stats.partial || null, cleared: judged.filter(j => j.cleared).length, domainDays: age?.days ?? null, seconds: +((Date.now() - t0) / 1000).toFixed(1),
       engines: ['chromium', 'nsfwjs', hasJev() && 'jev', hasDeepSeek() && 'deepseek'].filter(Boolean) },
   };
 }

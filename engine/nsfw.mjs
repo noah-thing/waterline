@@ -14,7 +14,7 @@ let modelPromise;
 async function model() {
   if (!modelPromise) {
     modelPromise = (async () => {
-      setWasmPaths('file://' + path.join(root, 'node_modules/@tensorflow/tfjs-backend-wasm/dist/'));
+      setWasmPaths(path.join(root, 'node_modules/@tensorflow/tfjs-backend-wasm/dist') + '/');
       const ok = await tf.setBackend('wasm').catch(() => false);
       if (!ok) await tf.setBackend('cpu');
       await tf.ready();
@@ -72,3 +72,4 @@ export async function pixelThumb(buf, cells = 40) {
 }
 
 export const warm = () => model();
+export const backendName = () => tf.getBackend();

@@ -429,6 +429,7 @@ function showReport(r) {
   }
   list.hidden = !list.children.length;
   $('#rLine').textContent = summary(v, groups.filter(g => g.severity === 'block').concat(groups.filter(g => g.severity === 'warn')), s) || r.line || '';
+  if (s.partial?.length && v !== 'unknown') $('#rLine').textContent += ' The page was slow, so this is based on what Waterline could read in time.';
 
   const bits = [];
   if (s.requests != null) bits.push(plural(s.requests, 'request', 'requests'));
