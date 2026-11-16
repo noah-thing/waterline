@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://usewaterline.vercel.app"><b>Open Waterline</b></a>
+  <a href="https://waterline.cc"><b>Open Waterline</b></a>
   &nbsp;·&nbsp;
   <a href="#what-it-checks">What it checks</a>
   &nbsp;·&nbsp;
@@ -21,7 +21,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="MIT licence" src="https://img.shields.io/badge/license-MIT-555?style=flat-square"></a>
-  <a href="https://usewaterline.vercel.app"><img alt="Live on Vercel" src="https://img.shields.io/badge/live-usewaterline.vercel.app-555?style=flat-square"></a>
+  <a href="https://waterline.cc"><img alt="Live on Vercel" src="https://img.shields.io/badge/live-waterline.cc-555?style=flat-square"></a>
   <a href="https://x.com/fsconfig"><img alt="Follow @fsconfig on X" src="https://img.shields.io/badge/follow-%40fsconfig-555?style=flat-square&logo=x&logoColor=white"></a>
 </p>
 
