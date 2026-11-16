@@ -172,12 +172,19 @@ export async function scan(input, { emit = () => {}, allowLocal = false, signal 
       if (!(await allowedHost(final.hostname))) throw new Error('That link redirects into a private network.');
     }
 
-    let cdp = null;
+    let cdp = null, capFails = 0;
     const grab = async label => {
+      if (capFails >= 2) return; // this page will not render to an image here; don't keep paying for it
       if (frames.length >= LIMITS.frames) return;
       let buf = null;
       try { cdp ||= await page.context().newCDPSession(page); const r = await within(cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 60 }), 4000, null); if (r?.data) buf = Buffer.from(r.data, 'base64'); } catch {}
-      if (!buf) buf = await page.screenshot({ type: 'jpeg', quality: 60, timeout: 3000, animations: 'allow', caret: 'initial' }).catch(() => null);
+      if (!buf && !capFails) {
+        // Video-heavy pages can stall the capture: pause their media once and retry.
+        await within(page.evaluate(() => document.querySelectorAll('video,audio').forEach(m => { try { m.pause(); } catch {} })), 1500, null);
+        buf = await page.screenshot({ type: 'jpeg', quality: 60, timeout: 3000, animations: 'disabled', caret: 'initial' }).catch(() => null);
+      }
+      if (!buf) { if (++capFails >= 2) cut('screen captures'); return; }
+      capFails = 0;
       if (!buf) return;
       const small = await sharp(buf, { animated: false, limitInputPixels: 25e6 }).resize(16, 10, { fit: 'fill' }).greyscale().raw().toBuffer();
       if (frames.some(f => f.small.reduce((s, v, i) => s + Math.abs(v - small[i]), 0) / small.length < 3)) return;
