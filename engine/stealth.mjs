@@ -232,7 +232,8 @@ export function initScript(id, tag) {
     masked.set(FakeDate, 'function Date() { [native code] }');
     method(FakeDate, 'now', function () { return now(); }, 0); method(FakeDate, 'parse', function (s) { return RealDate.parse(s); }, 1); method(FakeDate, 'UTC', function (...a) { return RealDate.UTC(...a); }, 7);
     Object.defineProperty(window, 'Date', { value: FakeDate, writable: true, configurable: true, enumerable: false });
-    method(perfProto, 'now', function () { return perfNow.call(performance) + skew; }, 0);
+    // Desktop Chrome coarsens this clock to 0.1 ms steps; the headless build is finer.
+    method(perfProto, 'now', function () { return Math.floor((perfNow.call(performance) + skew) * 10) / 10; }, 0);
     window.addEventListener(TAG + 'ff', e => {
       const end = now() + (+e.detail || 0);
       for (let guard = 0; guard < 5000; guard++) {
