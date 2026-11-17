@@ -84,7 +84,7 @@ node server.mjs        # http://localhost:4321
 
 Without any keys Waterline still runs the browser, the rules and the on-device image model.
 
-`testbed/` has three pages to try it on: a clean game, a ClickFix page, and a Flappy-style game that turns hostile 60 seconds after Play. Start the server with `WL_ALLOW_LOCAL=1` to scan them; that switch is ignored on Vercel.
+`testbed/` has pages to try it on: a clean game, a ClickFix page, a Flappy-style game that turns hostile 60 seconds after Play, and a cloaked version that hides from scanners. Start the server with `WL_ALLOW_LOCAL=1` to scan them; that switch is ignored on Vercel.
 
 ### Deploy
 
@@ -100,6 +100,7 @@ On Vercel the API refuses to scan until the Upstash store is connected, so limit
 ## Security
 
 - **Sealed browser.** All of Chromium's traffic goes through a proxy inside the function. Each host is resolved once, checked against private and reserved ranges, and the connection goes to that exact address, so redirects, iframes and DNS rebinding cannot reach internal services. QUIC is off and WebRTC cannot send UDP around the proxy.
+- **Looks like a person.** The sandbox presents as an ordinary desktop Chrome in every frame and worker: no automation flag, consistent browser identity and client hints, real plugins, a normal graphics card, a browser-sized window, native-looking functions and a hand-like mouse. Its own hooks and clock leave nothing on the page. `testbed/cloaked` is a trap that only misbehaves for real people; Waterline still catches it.
 - **Keys stay on the server.** API keys live in encrypted environment variables and are never sent to the browser. The headless browser is started with a stripped environment that holds no keys.
 - **Fair use.** Six scans per person every ten minutes and forty a day, one at a time, with a daily budget across everyone. People are told apart by a salted hash of their IP (IPv6 by /48), and nothing else is stored.
 - **Strict page.** A content security policy with no third-party scripts, styles or fonts, no framing, and every scan result written as text, never as HTML.

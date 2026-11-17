@@ -172,6 +172,18 @@ export async function scan(input, { emit = () => {}, allowLocal = false, signal 
 
     // Jumps the page's clock through Waterline's private event, in every frame.
     const fastForward = ms => Promise.all(page.frames().map(fr => within(fr.evaluate(([t, d]) => { dispatchEvent(new CustomEvent(t, { detail: d })); }, [tag + 'ff', ms]), 4000, null)));
+    // Clicks like a hand on a mouse: travel in a few steps to a slightly off-centre point,
+    // press, hold briefly, release. Exact-centre instant clicks are a known bot tell.
+    const rnd = (a, b) => a + Math.random() * (b - a);
+    let mx = rnd(200, 1000), my = rnd(150, 650);
+    const click = async (x, y, spread = 10) => {
+      const tx = Math.max(2, Math.min(1278, x + rnd(-spread, spread))), ty = Math.max(2, Math.min(798, y + rnd(-spread * 0.6, spread * 0.6)));
+      await page.mouse.move(tx, ty, { steps: Math.round(rnd(6, 14)) }).catch(() => {});
+      mx = tx; my = ty;
+      await page.mouse.down().catch(() => {});
+      await page.waitForTimeout(Math.round(rnd(45, 110)));
+      await page.mouse.up().catch(() => {});
+    };
     let cdp = null, capFails = 0;
     const grab = async label => {
       if (capFails >= 2) return; // this page will not render to an image here; don't keep paying for it
@@ -218,7 +230,7 @@ export async function scan(input, { emit = () => {}, allowLocal = false, signal 
         for (const { fr, bx } of cands.slice(0, 4)) {
           const hit = await findPlay(fr);
           if (!hit) continue;
-          await page.mouse.click(bx.x + hit.x, bx.y + hit.y).catch(() => {});
+          await click(bx.x + hit.x, bx.y + hit.y, 6);
           clicked.push(hit.t); say('play', `Clicked "${hit.t}"`); await page.waitForTimeout(800); break;
         }
         if (round === 0) await grab(clicked.length ? `After "${clicked.at(-1)}"` : 'Idle');
@@ -233,8 +245,8 @@ export async function scan(input, { emit = () => {}, allowLocal = false, signal 
       say('play', box ? 'Playing the game canvas' : 'Clicking through the page');
       const keys = ['Space', 'Enter', 'ArrowUp', 'Space', 'KeyW', 'ArrowRight', 'Space', 'KeyZ'];
       for (let i = 0; i < 8; i++) {
-        await page.mouse.click(target.x, target.y).catch(() => {});
-        await page.keyboard.press(keys[i]).catch(() => {});
+        await click(target.x, target.y, 24);
+        await page.keyboard.press(keys[i], { delay: Math.round(rnd(40, 90)) }).catch(() => {});
         await page.waitForTimeout(350);
         if (i === 3 || i === 7) await grab(`Playing ${Math.round((Date.now() - t0) / 1000)}s`);
       }
@@ -243,7 +255,7 @@ export async function scan(input, { emit = () => {}, allowLocal = false, signal 
       await fastForward(120000); say('play', 'Fast-forwarded 2 minutes of timers');
       await page.waitForTimeout(900);
       await grab('After 2 min (fast-forward)');
-      for (let i = 0; i < 4; i++) { await page.mouse.click(target.x, target.y).catch(() => {}); await page.keyboard.press('Space').catch(() => {}); await page.waitForTimeout(250); }
+      for (let i = 0; i < 4; i++) { await click(target.x, target.y, 24); await page.keyboard.press('Space', { delay: Math.round(rnd(40, 90)) }).catch(() => {}); await page.waitForTimeout(Math.round(rnd(180, 320))); }
       await fastForward(300000);
       await page.waitForTimeout(700);
       await grab('After 7 min (fast-forward)');
