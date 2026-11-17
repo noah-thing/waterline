@@ -9,11 +9,17 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
+const KNOWN = { 153: '153.0.8010.0' };
 
 // The Chromium version that will run, known before launch so workers get the same identity.
 export function chromiumVersion(onVercel) {
   try {
-    if (onVercel) { const v = require('@sparticuz/chromium/package.json').version; return `${v.split('.')[0]}.0.0.0`; }
+    if (onVercel) {
+      const pkgPath = [path.join(process.cwd(), 'node_modules/@sparticuz/chromium/package.json'), path.join(path.dirname(new URL(import.meta.url).pathname), '../node_modules/@sparticuz/chromium/package.json')].find(f => fs.existsSync(f));
+      const v = JSON.parse(fs.readFileSync(pkgPath, 'utf8')).version;
+      // @sparticuz/chromium 153.x ships Chromium 153.0.8010.0.
+      return KNOWN[v.split('.')[0]] || `${v.split('.')[0]}.0.0.0`;
+    }
     const b = JSON.parse(fs.readFileSync(path.join(path.dirname(require.resolve('playwright-core/package.json')), 'browsers.json'), 'utf8'));
     return b.browsers.find(x => x.name === 'chromium-headless-shell')?.browserVersion || '131.0.0.0';
   } catch { return '131.0.0.0'; }
