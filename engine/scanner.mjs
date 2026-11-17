@@ -10,6 +10,11 @@ import { normalizeUrl, guardHost, urlShape, domainAge, safeBrowsing, isPrivateIp
 import { scanCode, scanText, extractDataImages, extractImageUrls, isAdultHost, maskHost, isExecutable, IP_LOGGERS } from './rules.mjs';
 import { classify, backendName, warm } from './nsfw.mjs';
 import { startProxy, safeGet } from './egress.mjs';
+import { stealthArgs, chromiumVersion, identity, contextOptions, initScript, newTag, FINGERPRINT, patchWorkerScript } from './stealth.mjs';
+
+const ON_LAMBDA = !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+// One identity for the browser, every page and every worker, set before launch.
+const ID = identity(chromiumVersion(ON_LAMBDA));
 import { reviewImages, reviewFindings, reviewText, deepRead, hasJev, hasDeepSeek } from './judge.mjs';
 
 const LIMITS = { scripts: 80, scriptBytes: 3_000_000, totalScriptBytes: 14_000_000, images: 70, imageBytes: 5_000_000, requests: 700, frames: 9 };
@@ -24,14 +29,14 @@ function browserEnv() {
   return env;
 }
 
-async function launch(proxyPort) {
+async function launch(proxyPort, id = ID) {
   const { chromium } = await import('playwright-core');
   // All traffic goes through the egress proxy, loopback included; no QUIC or raw WebRTC UDP around it.
   const proxy = { server: `http://127.0.0.1:${proxyPort}`, bypass: '<-loopback>' };
-  const args = ['--proxy-bypass-list=<-loopback>', '--disable-quic', '--force-webrtc-ip-handling-policy=disable_non_proxied_udp', '--webrtc-ip-handling-policy=disable_non_proxied_udp',
+  const args = [...stealthArgs(id), '--proxy-bypass-list=<-loopback>', '--disable-quic', '--force-webrtc-ip-handling-policy=disable_non_proxied_udp', '--webrtc-ip-handling-policy=disable_non_proxied_udp',
     '--disable-dev-shm-usage', '--mute-audio', '--disable-extensions', '--disable-sync', '--no-first-run',
     '--disable-background-networking', '--disable-default-apps', '--disable-component-update', '--autoplay-policy=no-user-gesture-required'];
-  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  if (ON_LAMBDA) {
     const sp = (await import('@sparticuz/chromium')).default;
     const executablePath = await sp.executablePath();
     return chromium.launch({ executablePath, args: [...sp.args.filter(a => !/disable-web-security/.test(a)), ...args], headless: true, env: browserEnv(), proxy });
@@ -39,18 +44,7 @@ async function launch(proxyPort) {
   return chromium.launch({ headless: true, args, env: browserEnv(), proxy });
 }
 
-// Recorded inside every frame: what the page tries to do to the visitor.
-const HOOKS = `(() => {
-  const L = (k, v) => { try { (window.__wl ||= []).length < 200 && window.__wl.push([k, String(v ?? '').slice(0, 600)]); } catch {} };
-  try { if (navigator.clipboard) { navigator.clipboard.writeText = t => { L('clipboard', t); return Promise.resolve(); }; navigator.clipboard.write = () => { L('clipboard', '[binary]'); return Promise.resolve(); }; } } catch {}
-  try { const ec = Document.prototype.execCommand; Document.prototype.execCommand = function (c, ...a) { if (String(c).toLowerCase() === 'copy') { try { L('clipboard', String(getSelection() || document.activeElement?.value || '')); } catch {} } return ec.call(this, c, ...a); }; } catch {}
-  try { window.open = function (u) { L('open', u); return null; }; } catch {}
-  try { if (navigator.mediaDevices) navigator.mediaDevices.getUserMedia = c => { L('media', JSON.stringify(c)); return Promise.reject(new DOMException('Permission denied', 'NotAllowedError')); }; } catch {}
-  try { if (window.Notification) Notification.requestPermission = () => { L('notify', ''); return Promise.resolve('denied'); }; } catch {}
-  try { Element.prototype.requestFullscreen = function () { L('fullscreen', ''); return Promise.resolve(); }; } catch {}
-  try { if (navigator.geolocation) navigator.geolocation.getCurrentPosition = () => L('geo', ''); } catch {}
-  try { if (navigator.serviceWorker) navigator.serviceWorker.register = () => { L('sw', ''); return Promise.reject(new Error('blocked')); }; } catch {}
-})();`;
+// What the page tries to do to the visitor is recorded by the hooks in stealth.mjs.
 
 // Ad and tracking networks: never the threat to a stream, and the main cause of slow scans.
 const ADS = /(?:^|\.)(?:doubleclick\.net|googlesyndication\.com|googleadservices\.com|adservice\.google\.[a-z.]+|amazon-adsystem\.com|adnxs\.com|taboola\.com|outbrain\.com|criteo\.(?:com|net)|pubmatic\.com|rubiconproject\.com|openx\.net|casalemedia\.com|moatads\.com|scorecardresearch\.com|quantserve\.com|adsrvr\.org|3lift\.com|sharethrough\.com|indexww\.com|smartadserver\.com|teads\.tv|yieldmo\.com|media\.net|bidswitch\.net|lijit\.com|sovrn\.com|33across\.com|gumgum\.com|contextweb\.com|adform\.net|onetag-sys\.com|sonobi\.com|kargo\.com|ezoic\.net|ezojs\.com|mediavine\.com|adthrive\.com|hotjar\.com|clarity\.ms|id5-sync\.com|rlcdn\.com|bluekai\.com|demdex\.net|krxd\.net|adsafeprotected\.com|doubleverify\.com|imasdk\.googleapis\.com|prebid[a-z.-]*)$/i;
@@ -99,12 +93,16 @@ export async function scan(input, { emit = () => {}, allowLocal = false, signal 
   };
   let page, finalUrl = url.href, loadError = null, title = '';
   try {
+    const id = ID;
+    const tag = newTag();
     const context = await browser.newContext({
+      ...contextOptions(id),
       viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1, serviceWorkers: 'block', acceptDownloads: false,
-      permissions: [], locale: 'en-US', ignoreHTTPSErrors: true,
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      permissions: [], ignoreHTTPSErrors: true,
     });
-    await context.addInitScript(HOOKS);
+    const hookLog = [];
+    context.on('console', m => { try { const t = m.text(); if (t.startsWith(tag) && hookLog.length < 400) hookLog.push(JSON.parse(t.slice(tag.length))); } catch {} });
+    await context.addInitScript(initScript(id, tag));
     await context.route('**/*', async route => {
       const req = route.request();
       let u; try { u = new URL(req.url()); } catch { return route.abort(); }
@@ -118,6 +116,7 @@ export async function scan(input, { emit = () => {}, allowLocal = false, signal 
       if (isAdultHost(u.hostname)) add({ rule: 'adult-request', severity: 'block', category: 'nsfw', title: 'Loads content from an adult site', detail: `While running, the page contacted ${maskHost(u.hostname)}.`, where: maskHost(u.hostname), source: 'observed' });
       if (IP_LOGGERS.test(u.hostname)) add({ rule: 'iplogger-request', severity: 'block', category: 'privacy', title: 'Contacted an IP logger', detail: `The page called ${u.hostname}, a service that records visitor IP addresses.`, where: u.hostname, source: 'observed' });
       if (isExecutable(u.pathname)) { downloads.push(u.href); return route.abort(); }
+      if (await patchWorkerScript(route, id)) return;
       return route.continue();
     });
 
@@ -147,7 +146,6 @@ export async function scan(input, { emit = () => {}, allowLocal = false, signal 
     context.on('page', p => { if (p !== page) { popups.add(p.url()); p.close().catch(() => {}); } });
     page.on('dialog', d => { add({ rule: 'dialog', severity: 'info', category: 'context', title: 'Shows pop-up dialogs', detail: `"${d.message().slice(0, 120)}"`, source: 'observed' }); d.dismiss().catch(() => {}); });
     page.on('download', d => downloads.push(d.url()));
-    try { await page.clock.install(); } catch {}
 
     say('render', 'Opening in an isolated browser');
     try {
@@ -172,6 +170,8 @@ export async function scan(input, { emit = () => {}, allowLocal = false, signal 
       if (!(await allowedHost(final.hostname))) throw new Error('That link redirects into a private network.');
     }
 
+    // Jumps the page's clock through Waterline's private event, in every frame.
+    const fastForward = ms => Promise.all(page.frames().map(fr => within(fr.evaluate(([t, d]) => { dispatchEvent(new CustomEvent(t, { detail: d })); }, [tag + 'ff', ms]), 4000, null)));
     let cdp = null, capFails = 0;
     const grab = async label => {
       if (capFails >= 2) return; // this page will not render to an image here; don't keep paying for it
@@ -240,18 +240,16 @@ export async function scan(input, { emit = () => {}, allowLocal = false, signal 
       }
       // Payloads that wait (setTimeout 60s, "after 3 deaths"...): jump the clock forward.
       if (past('play')) cut('play');
-      try { await page.clock.fastForward('02:00'); say('play', 'Fast-forwarded 2 minutes of timers'); } catch {}
+      await fastForward(120000); say('play', 'Fast-forwarded 2 minutes of timers');
       await page.waitForTimeout(900);
       await grab('After 2 min (fast-forward)');
       for (let i = 0; i < 4; i++) { await page.mouse.click(target.x, target.y).catch(() => {}); await page.keyboard.press('Space').catch(() => {}); await page.waitForTimeout(250); }
-      try { await page.clock.fastForward('05:00'); } catch {}
+      await fastForward(300000);
       await page.waitForTimeout(700);
       await grab('After 7 min (fast-forward)');
     }
 
     // What the page tried to do while we played.
-    const hookLog = [];
-    for (const fr of page.frames()) hookLog.push(...((await within(fr.evaluate(() => window.__wl || []), 3000, [])) || []));
     for (const [k, v] of hookLog) {
       if (k === 'clipboard' && /powershell|mshta|cmd(?:\.exe)?\s*\/c|iex\b|Invoke-|curl\s.+\|\s*(?:ba)?sh|bitsadmin|certutil|wscript|rundll32|msiexec/i.test(v))
         add({ rule: 'clipboard-cmd', severity: 'block', category: 'malware', title: 'Put a command on your clipboard', detail: 'The page silently copied a system command, the first step of the ClickFix malware trick.', excerpt: v.slice(0, 140), source: 'observed' });
@@ -351,7 +349,8 @@ export async function scan(input, { emit = () => {}, allowLocal = false, signal 
       const j = frameJ[i], s = frameScores[i];
       const nude = j?.nudity ?? null, loc = s?.explicit ?? 0;
       const explicit = nude != null ? (nude >= 0.7 || (nude >= 0.4 && loc >= 0.85)) : loc >= 0.9;
-      const maybe = !explicit && (nude != null ? nude >= 0.45 : loc >= 0.6);
+      // "Possibly" needs a confident second opinion, or both judges leaning the same way.
+      const maybe = !explicit && (nude != null ? (nude >= 0.65 || (nude >= 0.5 && loc >= 0.5)) : loc >= 0.75);
       if (explicit || maybe) add({ rule: 'frame-nsfw', severity: explicit ? 'block' : 'warn', category: 'nsfw', title: explicit ? 'Explicit image on screen' : 'Possibly explicit image on screen',
         detail: `Seen ${f.label.toLowerCase()}.`, where: f.label, thumb: thumbs[i], score: Math.max(nude ?? 0, loc), source: 'observed' });
       if (j?.gore >= 0.75) add({ rule: 'frame-gore', severity: 'warn', category: 'stream', title: 'Graphic gore on screen', detail: `Seen ${f.label.toLowerCase()}.`, where: f.label, thumb: thumbs[i], source: 'observed' });
@@ -361,7 +360,8 @@ export async function scan(input, { emit = () => {}, allowLocal = false, signal 
     for (let i = 0; i < Math.min(imageCands.length, 12); i++) {
       const c = imageCands[i], j = imgJ[i], loc = c.score.explicit, nude = j?.nudity ?? null;
       const explicit = nude != null ? (nude >= 0.7 || (nude >= 0.4 && loc >= 0.85)) : loc >= 0.9;
-      const maybe = !explicit && (nude != null ? nude >= 0.45 : loc >= 0.6);
+      // "Possibly" needs a confident second opinion, or both judges leaning the same way.
+      const maybe = !explicit && (nude != null ? (nude >= 0.65 || (nude >= 0.5 && loc >= 0.5)) : loc >= 0.75);
       const where = c.hidden ? 'Hidden inside one of its scripts' : (c.later ? 'Referenced in code, not shown yet' : 'Loaded by the page');
       if (explicit || maybe) add({ rule: 'image-nsfw', severity: explicit ? 'block' : 'warn', category: 'nsfw',
         title: c.hidden ? 'Explicit image hidden in the code' : (explicit ? 'Explicit image in the game files' : 'Possibly explicit image in the files'),
@@ -446,4 +446,24 @@ function verdict({ findings, loadError, url, finalUrl, title, stats, age, judged
       images: stats.images, frames: stats.frames, partial: stats.partial || null, cleared: judged.filter(j => j.cleared).length, domainDays: age?.days ?? null, seconds: +((Date.now() - t0) / 1000).toFixed(1),
       engines: ['chromium', 'nsfwjs', hasJev() && 'jev', hasDeepSeek() && 'deepseek'].filter(Boolean) },
   };
+}
+
+// Opens a page exactly as a scan does and returns what that page can see about the browser,
+// plus the result rows of a bot-detection test page when one is given.
+export async function probe(target = 'https://example.com/') {
+  const proxy = await startProxy({ allowLocal: false });
+  const browser = await launch(proxy.port);
+  try {
+    const id = ID;
+    const context = await browser.newContext({ ...contextOptions(id), viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1, serviceWorkers: 'block', acceptDownloads: false, permissions: [], ignoreHTTPSErrors: true });
+    await context.addInitScript(initScript(id, newTag()));
+    await context.route('**/*', async route => { if (!(await patchWorkerScript(route, id))) await route.continue(); });
+    const page = await context.newPage();
+    await page.goto(target, { waitUntil: 'load', timeout: 25000 }).catch(() => {});
+    await page.waitForTimeout(2500);
+    const seen = await page.evaluate(FINGERPRINT).catch(e => ({ error: e.message }));
+    const failed = await page.evaluate(() => [...document.querySelectorAll('td.failed, td.warn, .failed')].map(td => (td.closest('tr')?.innerText || td.innerText).replace(/\s+/g, ' ').trim()).slice(0, 40)).catch(() => []);
+    const flagged = await page.evaluate(() => document.body.innerText.split('\n').filter(l => /": true|% (like )?headless|% stealth|You are/i.test(l)).map(l => l.trim()).slice(0, 30)).catch(() => []);
+    return { browser: browser.version(), target, seen, failed, flagged };
+  } finally { await browser.close().catch(() => {}); proxy.close(); }
 }

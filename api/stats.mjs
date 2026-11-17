@@ -2,6 +2,8 @@
 import crypto from 'node:crypto';
 import { readStats } from '../engine/guard.mjs';
 
+export const config = { maxDuration: 60 };
+
 const same = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); };
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const COLS = [
@@ -16,6 +18,17 @@ export default async function handler(req, res) {
   res.setHeader('cache-control', 'no-store');
   res.setHeader('x-robots-tag', 'noindex, nofollow');
   if (!key || !same(given, key)) { res.statusCode = 404; return res.end('Not found'); }
+  // ?probe=<https url>: open that page exactly as a scan does and show what it could see.
+  const probeUrl = new URL(req.url, 'http://x').searchParams.get('probe');
+  if (probeUrl) {
+    if (!/^https:\/\/[^\s]+$/.test(probeUrl) || probeUrl.length > 300) { res.statusCode = 400; return res.end('Bad probe url'); }
+    try {
+      const { probe } = await import('../engine/scanner.mjs');
+      const out = await probe(probeUrl);
+      res.setHeader('content-type', 'application/json; charset=utf-8');
+      return res.end(JSON.stringify(out, null, 1));
+    } catch (e) { res.statusCode = 500; return res.end('Probe failed'); }
+  }
   let rows;
   try { rows = await readStats(30); } catch { res.statusCode = 503; return res.end('Store unavailable'); }
   for (const r of rows) {
